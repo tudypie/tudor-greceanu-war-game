@@ -62,12 +62,13 @@ public class PlaneController : MonoBehaviour
         Camera.transform.SetParent(null);
     }
 
-    void Update()
+    void FixedUpdate()
     {
         var move = _moveAction.ReadValue<Vector2>();
         var agility = _jumpAction.IsPressed() ? ThrustAgilityMultiplier : 1f;
+        var dt = Time.fixedDeltaTime;
 
-        _deltaPitch = (InvertPitch ? -move.y : move.y) * PitchIncreaseSpeed * agility * Time.deltaTime;
+        _deltaPitch = (InvertPitch ? -move.y : move.y) * PitchIncreaseSpeed * agility * dt;
 
         var keyboard = Keyboard.current;
         var barrelRollDir = 0f;
@@ -81,26 +82,23 @@ public class PlaneController : MonoBehaviour
         _worldPitch = barrelRollDir != 0f;
         if (barrelRollDir != 0f)
         {
-            _deltaRoll = barrelRollDir * BarrelRollSpeed * agility * Time.deltaTime;
+            _deltaRoll = barrelRollDir * BarrelRollSpeed * agility * dt;
             _deltaYaw = 0f;
         }
         else
         {
             if (Mathf.Approximately(move.x, 0f))
             {
-                _deltaRoll = -bank * RollAutoLevelSpeed * agility * Time.deltaTime;
+                _deltaRoll = -bank * RollAutoLevelSpeed * agility * dt;
             }
             else
             {
-                _deltaRoll = -move.x * RollIncreaseSpeed * agility * Time.deltaTime;
+                _deltaRoll = -move.x * RollIncreaseSpeed * agility * dt;
             }
 
-            _deltaYaw = -bank * BankTurnSpeed * agility * Time.deltaTime;
+            _deltaYaw = -bank * BankTurnSpeed * agility * dt;
         }
-    }
 
-    void FixedUpdate()
-    {
         var localRotation = _transform.localRotation;
         localRotation *= Quaternion.Euler(0f, 0f, _deltaRoll);
         if (!_worldPitch)
