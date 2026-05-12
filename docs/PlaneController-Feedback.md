@@ -1,0 +1,5 @@
+- [ ] L
+- Decrease pitch speed to ~50
+- Restrict A-D movement to roll, no yaw
+- Restrict Q-E movement to yaw, no roll
+- Yaw should feel sluggish to encourage banking
