@@ -25,8 +25,11 @@ public class PlaneCameraFollow : MonoBehaviour
             + Vector3.up * FollowOffset.y
             + _transform.right * FollowOffset.x;
 
+        var spring = Mathf.Clamp01(CameraSpring);
+        var alpha = 1f - Mathf.Pow(spring, Time.deltaTime * 60f);
+
         var cam = Camera.transform;
-        cam.position = cam.position * CameraSpring + targetPos * (1 - CameraSpring);
+        cam.position = Vector3.Lerp(cam.position, targetPos, alpha);
 
         if (CameraTarget != null) cam.LookAt(CameraTarget);
         else cam.LookAt(_transform);

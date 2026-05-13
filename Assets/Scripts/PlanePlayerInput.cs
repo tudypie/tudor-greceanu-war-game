@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+[DefaultExecutionOrder(-100)]
 [RequireComponent(typeof(PlaneFlightModel))]
 public class PlanePlayerInput : MonoBehaviour
 {
@@ -30,7 +31,7 @@ public class PlanePlayerInput : MonoBehaviour
         _shooter = GetComponent<PlaneShooter>();
     }
 
-    void Update()
+    void FixedUpdate()
     {
         var move = _moveAction.ReadValue<Vector2>();
         var keyboard = Keyboard.current;
@@ -45,7 +46,10 @@ public class PlanePlayerInput : MonoBehaviour
         _model.RollInput = move.x;
         _model.YawInput = yaw;
         _model.Boost = _jumpAction.IsPressed();
+    }
 
+    void Update()
+    {
         if (_shooter != null) _shooter.Trigger = _attackAction.IsPressed();
     }
 }

@@ -22,8 +22,6 @@ public class PlaneShooter : MonoBehaviour
     public Color TracerColor = new Color(1f, 0.85f, 0.3f, 1f);
     public float TracerWidth = 0.12f;
 
-    public bool ShowHeatHud = true;
-
     float _heat;
     bool _overheated;
     float _nextFireTime;
@@ -118,35 +116,5 @@ public class PlaneShooter : MonoBehaviour
         }
         _tracer.startColor = TracerColor;
         _tracer.endColor = new Color(TracerColor.r, TracerColor.g, TracerColor.b, 0f);
-    }
-
-    void OnGUI()
-    {
-        if (!ShowHeatHud) return;
-
-        const float width = 240f;
-        const float height = 14f;
-        var x = (Screen.width - width) * 0.5f;
-        var y = Screen.height - 40f;
-
-        var bg = new Rect(x, y, width, height);
-        GUI.Box(bg, GUIContent.none);
-
-        var frac = Mathf.Clamp01(HeatNormalized);
-        var fill = new Rect(x + 2f, y + 2f, (width - 4f) * frac, height - 4f);
-
-        var prev = GUI.color;
-        GUI.color = _overheated
-            ? new Color(1f, 0.3f, 0.3f, 0.9f)
-            : Color.Lerp(new Color(0.3f, 1f, 0.4f, 0.9f), new Color(1f, 0.85f, 0.2f, 0.9f), frac);
-        GUI.DrawTexture(fill, Texture2D.whiteTexture);
-        GUI.color = prev;
-
-        var label = _overheated ? "OVERHEATED" : $"HEAT {(int)(frac * 100f)}%";
-        var labelRect = new Rect(x, y - 18f, width, 18f);
-        var prevAlign = GUI.skin.label.alignment;
-        GUI.skin.label.alignment = TextAnchor.MiddleCenter;
-        GUI.Label(labelRect, label);
-        GUI.skin.label.alignment = prevAlign;
     }
 }

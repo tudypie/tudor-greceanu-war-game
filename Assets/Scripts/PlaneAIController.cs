@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[DefaultExecutionOrder(-100)]
 [RequireComponent(typeof(PlaneFlightModel))]
 public class PlaneAIController : MonoBehaviour
 {
@@ -43,7 +44,7 @@ public class PlaneAIController : MonoBehaviour
         }
     }
 
-    void Update()
+    void FixedUpdate()
     {
         if (Target == null || _model == null) return;
 
@@ -67,7 +68,7 @@ public class PlaneAIController : MonoBehaviour
         }
 
         var alpha = ReactionTime > 0f
-            ? 1f - Mathf.Exp(-Time.deltaTime / ReactionTime)
+            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / ReactionTime)
             : 1f;
         _smoothPitch = Mathf.Lerp(_smoothPitch, targetPitch, alpha);
         _smoothRoll = Mathf.Lerp(_smoothRoll, targetRoll, alpha);
