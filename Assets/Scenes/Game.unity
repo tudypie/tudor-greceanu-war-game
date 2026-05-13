@@ -763,9 +763,12 @@ GameObject:
   m_Component:
   - component: {fileID: 729352964}
   - component: {fileID: 729352963}
+  - component: {fileID: 729352965}
   - component: {fileID: 729352962}
   - component: {fileID: 729352961}
   - component: {fileID: 729352960}
+  - component: {fileID: 729352967}
+  - component: {fileID: 729352966}
   m_Layer: 0
   m_Name: EnemyPlane
   m_TagString: Untagged
@@ -790,13 +793,15 @@ MonoBehaviour:
   PitchGain: 2.5
   YawGain: 1.5
   RollGain: 3.5
-  BehindRollAssist: 1
-  BehindPitchAssist: 0.5
-  BoostDistance: 80
-  BoostMaxAngleDeg: 35
+  CommitMin: 0.8
+  CommitMax: 1.5
   FireConeDeg: 8
   FireRange: 350
   FireMinDistance: 12
+  BurstMin: 0.4
+  BurstMax: 0.8
+  CooldownMin: 0.6
+  CooldownMax: 1.2
   ReactionTime: 0.15
 --- !u!114 &729352961
 MonoBehaviour:
@@ -814,6 +819,7 @@ MonoBehaviour:
   Range: 400
   FireInterval: 0.08
   MuzzleOffsetZ: 4
+  Damage: 8
   HitMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -848,6 +854,9 @@ MonoBehaviour:
   RollAutoLevelSpeed: 0
   YawSpeed: 30
   BankTurnSpeed: 4
+  RollResponseTime: 0.3
+  PitchResponseTime: 0.3
+  YawResponseTime: 0.3
   PitchInput: 0
   RollInput: 0
   YawInput: 0
@@ -895,6 +904,58 @@ Transform:
   - {fileID: 1967355189}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!65 &729352965
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 729352959}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 3.66, y: 1, z: 3.28}
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &729352966
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 729352959}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a3e36d1f7ff935429e70ff504646138, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealthBar
+  Camera: {fileID: 0}
+  WorldOffset: {x: 0, y: 3, z: 0}
+  BarWidth: 80
+  BarHeight: 8
+  HideWhenFull: 0
+--- !u!114 &729352967
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 729352959}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc364a18aedee0649a99689ec5a471d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealth
+  MaxHealth: 100
+  DestroyOnDeath: 1
 --- !u!1 &743019188
 GameObject:
   m_ObjectHideFlags: 0
@@ -2203,6 +2264,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1656378682}
   - component: {fileID: 1656378681}
+  - component: {fileID: 1656378692}
   - component: {fileID: 1656378680}
   - component: {fileID: 1656378683}
   - component: {fileID: 1656378684}
@@ -2210,6 +2272,9 @@ GameObject:
   - component: {fileID: 1656378686}
   - component: {fileID: 1656378687}
   - component: {fileID: 1656378688}
+  - component: {fileID: 1656378691}
+  - component: {fileID: 1656378690}
+  - component: {fileID: 1656378689}
   m_Layer: 0
   m_Name: PlayerPlane
   m_TagString: Untagged
@@ -2238,6 +2303,9 @@ MonoBehaviour:
   RollAutoLevelSpeed: 0
   YawSpeed: 30
   BankTurnSpeed: 4
+  RollResponseTime: 0.3
+  PitchResponseTime: 0.3
+  YawResponseTime: 0.3
   PitchInput: 0
   RollInput: 0
   YawInput: 0
@@ -2318,6 +2386,7 @@ MonoBehaviour:
   Range: 400
   FireInterval: 0.08
   MuzzleOffsetZ: 4
+  Damage: 8
   HitMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -2404,6 +2473,73 @@ MonoBehaviour:
   BoxColor: {r: 1, g: 1, b: 1, a: 0.35}
   CrosshairColor: {r: 1, g: 1, b: 1, a: 0.9}
   LockColor: {r: 1, g: 0.25, b: 0.25, a: 1}
+--- !u!114 &1656378689
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8a60093c90871647af4b25cea70e095, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealthHud
+  BarWidth: 240
+  BarHeight: 14
+  BottomMargin: 70
+--- !u!114 &1656378690
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a3e36d1f7ff935429e70ff504646138, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealthBar
+  Camera: {fileID: 3115011684921697858}
+  WorldOffset: {x: 0, y: 3, z: 0}
+  BarWidth: 80
+  BarHeight: 8
+  HideWhenFull: 0
+--- !u!114 &1656378691
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc364a18aedee0649a99689ec5a471d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealth
+  MaxHealth: 100
+  DestroyOnDeath: 1
+--- !u!65 &1656378692
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 3.66, y: 1, z: 3.28}
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &1730991047
 GameObject:
   m_ObjectHideFlags: 0

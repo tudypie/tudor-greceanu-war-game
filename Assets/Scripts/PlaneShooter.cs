@@ -10,7 +10,10 @@ public class PlaneShooter : MonoBehaviour
     public float Range = 400f;
     public float FireInterval = 0.08f;
     public float MuzzleOffsetZ = 4f;
+    public float Damage = 8f;
     public LayerMask HitMask = ~0;
+
+    PlaneHealth _ownHealth;
 
     public float HeatPerShot = 6f;
     public float MaxHeat = 100f;
@@ -38,6 +41,7 @@ public class PlaneShooter : MonoBehaviour
     {
         _tracer = GetComponent<LineRenderer>();
         if (_tracer == null) _tracer = gameObject.AddComponent<LineRenderer>();
+        _ownHealth = GetComponent<PlaneHealth>();
         ConfigureTracer();
     }
 
@@ -82,6 +86,8 @@ public class PlaneShooter : MonoBehaviour
         if (Physics.Raycast(origin, direction, out var hit, Range, HitMask, QueryTriggerInteraction.Ignore))
         {
             endPoint = hit.point;
+            var victim = hit.collider.GetComponentInParent<PlaneHealth>();
+            if (victim != null && victim != _ownHealth) victim.TakeDamage(Damage);
         }
         else
         {
