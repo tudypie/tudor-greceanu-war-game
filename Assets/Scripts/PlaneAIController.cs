@@ -15,18 +15,30 @@ public class PlaneAIController : MonoBehaviour
     public float PitchGain = 2.5f;
     public float YawGain = 1.5f;
     public float RollGain = 3.5f;
-    public float BehindRollAssist = 1f;
-    public float BehindPitchAssist = 0.5f;
+
+    [Header("Commit Window")]
+    public float CommitMin = 0.8f;
+    public float CommitMax = 1.5f;
 
     [Header("Firing")]
     public float FireConeDeg = 8f;
     public float FireRange = 350f;
     public float FireMinDistance = 12f;
 
+    [Header("Burst Fire")]
+    public float BurstMin = 0.4f;
+    public float BurstMax = 0.8f;
+    public float CooldownMin = 0.6f;
+    public float CooldownMax = 1.2f;
+
     [Header("Feel")]
     public float ReactionTime = 0.15f;
 
     float _smoothPitch, _smoothRoll, _smoothYaw;
+    Vector3 _committedAimPoint;
+    float _commitUntil;
+    float _burstUntil;
+    float _cooldownUntil;
 
     void Start()
     {
@@ -38,13 +50,22 @@ public class PlaneAIController : MonoBehaviour
             var player = FindFirstObjectByType<PlanePlayerInput>();
             if (player != null) Target = player.transform;
         }
+        if (Target != null) _committedAimPoint = Target.position;
     }
 
     void FixedUpdate()
     {
         if (Target == null || _model == null) return;
 
-        var toTarget = Target.position - _transform.position;
+        if (Time.fixedTime >= _commitUntil)
+        {
+            _committedAimPoint = Target.position;
+            _commitUntil = Time.fixedTime + Random.Range(CommitMin, CommitMax);
+        }
+
+        var liveDistance = Vector3.Distance(Target.position, _transform.position);
+
+        var toTarget = _committedAimPoint - _transform.position;
         var distance = toTarget.magnitude;
         if (distance < 0.0001f) return;
 
@@ -55,13 +76,6 @@ public class PlaneAIController : MonoBehaviour
         var targetPitch = Mathf.Clamp(dirLocal.y * PitchGain * pitchSign, -1f, 1f);
         var targetRoll = Mathf.Clamp(dirLocal.x * RollGain, -1f, 1f);
         var targetYaw = Mathf.Clamp(dirLocal.x * YawGain, -1f, 1f);
-
-        if (dirLocal.z < 0f)
-        {
-            var side = dirLocal.x >= 0f ? 1f : -1f;
-            targetRoll = Mathf.Clamp(targetRoll + side * BehindRollAssist, -1f, 1f);
-            targetPitch = Mathf.Clamp(targetPitch + BehindPitchAssist * pitchSign, -1f, 1f);
-        }
 
         var alpha = ReactionTime > 0f
             ? 1f - Mathf.Exp(-Time.fixedDeltaTime / ReactionTime)
@@ -80,8 +94,31 @@ public class PlaneAIController : MonoBehaviour
         {
             var coneCos = Mathf.Cos(FireConeDeg * Mathf.Deg2Rad);
             var aligned = dirLocal.z > coneCos;
-            var inRange = distance < FireRange && distance > FireMinDistance;
-            _shooter.Trigger = aligned && inRange;
+            var inRange = liveDistance < FireRange && liveDistance > FireMinDistance;
+            _shooter.Trigger = ResolveBurstTrigger(aligned && inRange);
         }
+    }
+
+    bool ResolveBurstTrigger(bool wantsFire)
+    {
+        var now = Time.time;
+
+        if (now < _cooldownUntil) return false;
+
+        if (now < _burstUntil) return wantsFire;
+
+        if (_burstUntil > 0f && now >= _burstUntil && _cooldownUntil < _burstUntil)
+        {
+            _cooldownUntil = now + Random.Range(CooldownMin, CooldownMax);
+            return false;
+        }
+
+        if (wantsFire)
+        {
+            _burstUntil = now + Random.Range(BurstMin, BurstMax);
+            return true;
+        }
+
+        return false;
     }
 }
