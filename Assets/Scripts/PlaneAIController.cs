@@ -4,6 +4,8 @@ using UnityEngine;
 [RequireComponent(typeof(PlaneFlightModel))]
 public class PlaneAIController : MonoBehaviour
 {
+    enum AIState { Patrolling, Chasing }
+
     PlaneFlightModel _model;
     PlaneShooter _shooter;
     Transform _transform;
@@ -19,6 +21,13 @@ public class PlaneAIController : MonoBehaviour
     [Header("Commit Window")]
     public float CommitMin = 0.8f;
     public float CommitMax = 1.5f;
+
+    [Header("Patrol")]
+    public float PatrolRadius = 350f;
+    public float PatrolVerticalRange = 60f;
+    public float PatrolMinWorldY = 30f;
+    public float PatrolWaypointReachDistance = 70f;
+    public float PatrolWaypointTimeout = 12f;
 
     [Header("Firing")]
     public float FireConeDeg = 8f;
@@ -40,6 +49,11 @@ public class PlaneAIController : MonoBehaviour
     float _burstUntil;
     float _cooldownUntil;
 
+    Vector3 _anchor;
+    Vector3 _patrolWaypoint;
+    float _patrolWaypointDeadline;
+    AIState _state = AIState.Patrolling;
+
     void Start()
     {
         _transform = transform;
@@ -50,26 +64,30 @@ public class PlaneAIController : MonoBehaviour
             var player = FindFirstObjectByType<PlanePlayerInput>();
             if (player != null) Target = player.transform;
         }
-        if (Target != null) _committedAimPoint = Target.position;
+        _anchor = _transform.position;
+        PickNewPatrolWaypoint();
+        _committedAimPoint = _patrolWaypoint;
     }
 
     void FixedUpdate()
     {
-        if (Target == null || _model == null) return;
+        if (_model == null) return;
+
+        UpdateState();
 
         if (Time.fixedTime >= _commitUntil)
         {
-            _committedAimPoint = Target.position;
+            _committedAimPoint = _state == AIState.Chasing && Target != null
+                ? Target.position
+                : _patrolWaypoint;
             _commitUntil = Time.fixedTime + Random.Range(CommitMin, CommitMax);
         }
 
-        var liveDistance = Vector3.Distance(Target.position, _transform.position);
+        var toAim = _committedAimPoint - _transform.position;
+        var aimDistance = toAim.magnitude;
+        if (aimDistance < 0.0001f) return;
 
-        var toTarget = _committedAimPoint - _transform.position;
-        var distance = toTarget.magnitude;
-        if (distance < 0.0001f) return;
-
-        var dirWorld = toTarget / distance;
+        var dirWorld = toAim / aimDistance;
         var dirLocal = _transform.InverseTransformDirection(dirWorld);
 
         var pitchSign = _model.InvertPitch ? +1f : -1f;
@@ -92,11 +110,88 @@ public class PlaneAIController : MonoBehaviour
 
         if (_shooter != null)
         {
-            var coneCos = Mathf.Cos(FireConeDeg * Mathf.Deg2Rad);
-            var aligned = dirLocal.z > coneCos;
-            var inRange = liveDistance < FireRange && liveDistance > FireMinDistance;
-            _shooter.Trigger = ResolveBurstTrigger(aligned && inRange);
+            var wantsFire = false;
+            if (_state == AIState.Chasing && Target != null)
+            {
+                var liveDistance = Vector3.Distance(Target.position, _transform.position);
+                var coneCos = Mathf.Cos(FireConeDeg * Mathf.Deg2Rad);
+                var aligned = dirLocal.z > coneCos;
+                var inRange = liveDistance < FireRange && liveDistance > FireMinDistance;
+                wantsFire = aligned && inRange;
+            }
+            _shooter.Trigger = ResolveBurstTrigger(wantsFire);
         }
+    }
+
+    void UpdateState()
+    {
+        if (_state == AIState.Chasing) return;
+
+        if (Target != null)
+        {
+            var distSq = (Target.position - _anchor).sqrMagnitude;
+            if (distSq <= PatrolRadius * PatrolRadius)
+            {
+                _state = AIState.Chasing;
+                _commitUntil = 0f;
+                return;
+            }
+        }
+
+        var reachSq = PatrolWaypointReachDistance * PatrolWaypointReachDistance;
+        if ((_patrolWaypoint - _transform.position).sqrMagnitude <= reachSq ||
+            Time.fixedTime >= _patrolWaypointDeadline)
+        {
+            PickNewPatrolWaypoint();
+            _commitUntil = 0f;
+        }
+    }
+
+    void PickNewPatrolWaypoint()
+    {
+        var horiz = Random.insideUnitCircle * PatrolRadius;
+        var dy = Random.Range(-PatrolVerticalRange, PatrolVerticalRange);
+        _patrolWaypoint = _anchor + new Vector3(horiz.x, dy, horiz.y);
+        if (_patrolWaypoint.y < PatrolMinWorldY) _patrolWaypoint.y = PatrolMinWorldY;
+        _patrolWaypointDeadline = Time.fixedTime + PatrolWaypointTimeout;
+    }
+
+    void OnDrawGizmos()
+    {
+        var chasing = Application.isPlaying && _state == AIState.Chasing;
+        Gizmos.color = chasing ? Color.red : Color.green;
+
+        var anchor = Application.isPlaying ? _anchor : transform.position;
+        DrawHorizontalCircle(anchor, PatrolRadius, 48);
+
+        DrawArrow(transform.position, transform.forward, 50f);
+    }
+
+    static void DrawHorizontalCircle(Vector3 center, float radius, int segments)
+    {
+        var step = Mathf.PI * 2f / segments;
+        var prev = center + new Vector3(radius, 0f, 0f);
+        for (int i = 1; i <= segments; i++)
+        {
+            var t = i * step;
+            var next = center + new Vector3(Mathf.Cos(t) * radius, 0f, Mathf.Sin(t) * radius);
+            Gizmos.DrawLine(prev, next);
+            prev = next;
+        }
+    }
+
+    static void DrawArrow(Vector3 origin, Vector3 dir, float length)
+    {
+        if (dir.sqrMagnitude < 0.0001f) return;
+        dir.Normalize();
+        var tip = origin + dir * length;
+        Gizmos.DrawLine(origin, tip);
+
+        var up = Mathf.Abs(Vector3.Dot(dir, Vector3.up)) < 0.99f ? Vector3.up : Vector3.forward;
+        var side = Vector3.Cross(dir, up).normalized;
+        var back = tip - dir * (length * 0.2f);
+        Gizmos.DrawLine(tip, back + side * (length * 0.12f));
+        Gizmos.DrawLine(tip, back - side * (length * 0.12f));
     }
 
     bool ResolveBurstTrigger(bool wantsFire)

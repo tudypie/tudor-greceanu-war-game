@@ -9,7 +9,7 @@ public class PlaneLockOn : MonoBehaviour
 
     public Camera Camera;
 
-    [Header("Reticle Box (screen px)")]
+    [Header("Reticle Box (px @ 1080p)")]
     public float BoxWidth = 360f;
     public float BoxHeight = 280f;
 
@@ -18,8 +18,12 @@ public class PlaneLockOn : MonoBehaviour
     public float CrosshairRange = 300f;
     [Tooltip("Higher = the crosshair catches up to its target screen position faster.")]
     public float CrosshairSmoothing = 12f;
+    [Tooltip("Crosshair arm length in pixels at 1080p — scales with resolution.")]
     public float CrosshairSize = 18f;
+    [Tooltip("Line thickness in pixels at 1080p — scales with resolution.")]
     public float LineThickness = 2f;
+    [Tooltip("Reference screen height the px values were authored against.")]
+    public float ReferenceHeight = 1080f;
 
     [Header("Lock-On")]
     public float MaxLockDistance = 800f;
@@ -44,6 +48,8 @@ public class PlaneLockOn : MonoBehaviour
 
     public bool HasLock => _lockedTarget != null && _lockProgress >= 1f;
     public Transform LockedTarget => HasLock ? _lockedTarget : null;
+
+    float UiScale => Screen.height / Mathf.Max(1f, ReferenceHeight);
 
     void Start()
     {
@@ -105,7 +111,10 @@ public class PlaneLockOn : MonoBehaviour
 
     Rect GetBoxRect()
     {
-        return new Rect(_restScreen.x - BoxWidth * 0.5f, _restScreen.y - BoxHeight * 0.5f, BoxWidth, BoxHeight);
+        var s = UiScale;
+        var w = BoxWidth * s;
+        var h = BoxHeight * s;
+        return new Rect(_restScreen.x - w * 0.5f, _restScreen.y - h * 0.5f, w, h);
     }
 
     Transform FindBestCandidate(Rect box)
@@ -200,19 +209,22 @@ public class PlaneLockOn : MonoBehaviour
     {
         if (Camera == null || !_restVisible) return;
 
+        var s = UiScale;
         var box = GetBoxRect();
         var guiBox = ScreenToGuiRect(box);
 
-        DrawBox(guiBox, BoxColor, 2f);
+        DrawBox(guiBox, BoxColor, Mathf.Max(1f, 2f * s));
 
         var crossColor = HasLock
             ? LockColor
             : (_lockedTarget != null ? Color.Lerp(CrosshairColor, LockColor, _lockProgress) : CrosshairColor);
 
         var cross = new Vector2(_crosshairScreen.x, Screen.height - _crosshairScreen.y);
-        DrawCrosshair(cross, CrosshairSize, crossColor);
+        var size = CrosshairSize * s;
+        var thickness = Mathf.Max(1f, LineThickness * s);
+        DrawCrosshair(cross, size, thickness, crossColor);
 
-        if (_lockedTarget != null) DrawLockBrackets(cross, CrosshairSize * 1.15f, crossColor, _lockProgress);
+        if (_lockedTarget != null) DrawLockBrackets(cross, size * 1.15f, thickness, crossColor, _lockProgress);
     }
 
     static Rect ScreenToGuiRect(Rect r)
@@ -232,25 +244,23 @@ public class PlaneLockOn : MonoBehaviour
         GUI.color = prev;
     }
 
-    void DrawCrosshair(Vector2 pos, float size, Color c)
+    static void DrawCrosshair(Vector2 pos, float size, float t, Color c)
     {
         var prev = GUI.color;
         GUI.color = c;
         var tex = Texture2D.whiteTexture;
-        var t = LineThickness;
         GUI.DrawTexture(new Rect(pos.x - size, pos.y - t * 0.5f, size * 2f, t), tex);
         GUI.DrawTexture(new Rect(pos.x - t * 0.5f, pos.y - size, t, size * 2f), tex);
         GUI.color = prev;
     }
 
-    void DrawLockBrackets(Vector2 pos, float size, Color c, float progress)
+    static void DrawLockBrackets(Vector2 pos, float size, float t, Color c, float progress)
     {
         var prev = GUI.color;
         var col = c;
         col.a *= Mathf.Lerp(0.4f, 1f, progress);
         GUI.color = col;
         var tex = Texture2D.whiteTexture;
-        var t = LineThickness;
         var arm = size * 0.45f;
 
         // top-left

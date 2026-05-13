@@ -526,6 +526,60 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: -56.077, z: 0}
+--- !u!1 &278588887
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 278588889}
+  - component: {fileID: 278588888}
+  m_Layer: 0
+  m_Name: Spawner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &278588888
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 278588887}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdc1bb579d739c746a5a1b300b1db6f9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneSpawner
+  EnemyPrefab: {fileID: 6693517527467847154, guid: c99d061dc179f8e46bc929d68d0c883e, type: 3}
+  TargetCount: 3
+  RespawnDelay: 2
+  MinRadius: 250
+  MaxRadius: 500
+  MinAltitudeAbovePlayer: -60
+  MaxAltitudeAbovePlayer: 120
+  MinWorldY: 0
+  MaxPlacementAttempts: 16
+  OffscreenMargin: 80
+--- !u!4 &278588889
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 278588887}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &303212583
 GameObject:
   m_ObjectHideFlags: 0
@@ -651,36 +705,14 @@ GameObject:
   - component: {fileID: 365786373}
   - component: {fileID: 365786372}
   - component: {fileID: 365786371}
-  - component: {fileID: 365786370}
-  m_Layer: 0
+  - component: {fileID: 365786374}
+  m_Layer: 6
   m_Name: Ground
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 4294967295
   m_IsActive: 1
---- !u!64 &365786370
-MeshCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 365786369}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 5
-  m_Convex: 0
-  m_CookingOptions: 30
-  m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
 --- !u!23 &365786371
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -753,164 +785,13 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &729352959
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 729352964}
-  - component: {fileID: 729352963}
-  - component: {fileID: 729352965}
-  - component: {fileID: 729352962}
-  - component: {fileID: 729352961}
-  - component: {fileID: 729352960}
-  - component: {fileID: 729352967}
-  - component: {fileID: 729352966}
-  m_Layer: 0
-  m_Name: EnemyPlane
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &729352960
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5da0e2b4c6d8a7f9e1b2c3d4a5b6c7d8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlaneAIController
-  Target: {fileID: 1656378682}
-  AutoFindPlayer: 1
-  PitchGain: 2.5
-  YawGain: 1.5
-  RollGain: 3.5
-  CommitMin: 0.8
-  CommitMax: 1.5
-  FireConeDeg: 8
-  FireRange: 350
-  FireMinDistance: 12
-  BurstMin: 0.4
-  BurstMax: 0.8
-  CooldownMin: 0.6
-  CooldownMax: 1.2
-  ReactionTime: 0.15
---- !u!114 &729352961
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9a3f7b1e4c2d8e6f5a4b3c2d1e0f9876, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Trigger: 0
-  Range: 400
-  FireInterval: 0.08
-  MuzzleOffsetZ: 4
-  Damage: 8
-  HitMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  HeatPerShot: 2
-  MaxHeat: 100
-  CoolPerSecond: 35
-  OverheatedCoolPerSecond: 45
-  ResumeHeatFraction: 0
-  TracerDuration: 0.04
-  TracerColor: {r: 1, g: 0.85, b: 0.3, a: 1}
-  TracerWidth: 0.12
-  UseAimDirection: 0
-  AimDirection: {x: 0, y: 0, z: 0}
---- !u!114 &729352962
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2a7c9b1e3d5f4a6c8b9e1d2c3a4f5b6e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  NormalThrust: 600
-  MaxThrust: 1200
-  ThrustAgilityMultiplier: 1.8
-  PitchIncreaseSpeed: 60
-  InvertPitch: 0
-  RollIncreaseSpeed: 60
-  RollAutoLevelSpeed: 0
-  YawSpeed: 30
-  BankTurnSpeed: 4
-  RollResponseTime: 0.3
-  PitchResponseTime: 0.3
-  YawResponseTime: 0.3
-  PitchInput: 0
-  RollInput: 0
-  YawInput: 0
-  Boost: 0
---- !u!54 &729352963
-Rigidbody:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  serializedVersion: 5
-  m_Mass: 1
-  m_LinearDamping: 0
-  m_AngularDamping: 0.05
-  m_CenterOfMass: {x: 0, y: 0, z: 0}
-  m_InertiaTensor: {x: 1, y: 1, z: 1}
-  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ImplicitCom: 1
-  m_ImplicitTensor: 1
-  m_UseGravity: 1
-  m_IsKinematic: 0
-  m_Interpolate: 0
-  m_Constraints: 0
-  m_CollisionDetection: 0
---- !u!4 &729352964
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 31.4, z: 85.6}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 1967355189}
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!65 &729352965
+--- !u!65 &365786374
 BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
+  m_GameObject: {fileID: 365786369}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -923,39 +804,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 3.66, y: 1, z: 3.28}
+  m_Size: {x: 10, y: 2.220446e-16, z: 10}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!114 &729352966
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5a3e36d1f7ff935429e70ff504646138, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealthBar
-  Camera: {fileID: 0}
-  WorldOffset: {x: 0, y: 3, z: 0}
-  BarWidth: 80
-  BarHeight: 8
-  HideWhenFull: 0
---- !u!114 &729352967
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 729352959}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bc364a18aedee0649a99689ec5a471d1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlaneHealth
-  MaxHealth: 100
-  DestroyOnDeath: 1
 --- !u!1 &743019188
 GameObject:
   m_ObjectHideFlags: 0
@@ -2265,8 +2115,8 @@ GameObject:
   - component: {fileID: 1656378682}
   - component: {fileID: 1656378681}
   - component: {fileID: 1656378692}
-  - component: {fileID: 1656378680}
   - component: {fileID: 1656378683}
+  - component: {fileID: 1656378680}
   - component: {fileID: 1656378684}
   - component: {fileID: 1656378685}
   - component: {fileID: 1656378686}
@@ -2275,6 +2125,8 @@ GameObject:
   - component: {fileID: 1656378691}
   - component: {fileID: 1656378690}
   - component: {fileID: 1656378689}
+  - component: {fileID: 1656378693}
+  - component: {fileID: 1656378694}
   m_Layer: 0
   m_Name: PlayerPlane
   m_TagString: Untagged
@@ -2383,7 +2235,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Trigger: 0
-  Range: 400
+  Range: 100
   FireInterval: 0.08
   MuzzleOffsetZ: 4
   Damage: 8
@@ -2460,14 +2312,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ed44a4b3ec23c6e459a6e935bab40309, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlaneLockOn
-  Camera: {fileID: 0}
+  Camera: {fileID: 3115011684921697858}
   BoxWidth: 360
   BoxHeight: 280
   CrosshairRange: 300
   CrosshairSmoothing: 12
   CrosshairSize: 18
   LineThickness: 2
-  MaxLockDistance: 800
+  ReferenceHeight: 1080
+  MaxLockDistance: 100
   AcquireTime: 0.25
   LoseGrace: 0.35
   BoxColor: {r: 1, g: 1, b: 1, a: 0.35}
@@ -2505,6 +2358,8 @@ MonoBehaviour:
   BarWidth: 80
   BarHeight: 8
   HideWhenFull: 0
+  MaxVisibleDistance: 300
+  FadeDistance: 60
 --- !u!114 &1656378691
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2518,7 +2373,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlaneHealth
   MaxHealth: 100
-  DestroyOnDeath: 1
+  DestroyOnDeath: 0
 --- !u!65 &1656378692
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2540,6 +2395,56 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 3.66, y: 1, z: 3.28}
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &1656378693
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef4de341009109540bded1f6d2af249c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneCrash
+  DisableOnCrash:
+  - {fileID: 1656378685}
+  - {fileID: 1656378684}
+  - {fileID: 1656378688}
+  Smoke: {fileID: 0}
+  DiveAlignTime: 0.4
+  LinearDamping: 0.2
+  AngularDamping: 0.1
+  DestroyDelay: 8
+  DestroyOnGroundImpact: 1
+  GroundMask:
+    serializedVersion: 2
+    m_Bits: 64
+  ExplodeOnCollision: 1
+  ExplosionPrefab: {fileID: 7301823495610001001, guid: 30787bea9354f0b47b061291d2aa471b, type: 3}
+--- !u!114 &1656378694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1656378679}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7cdbede8e0080194cb46c6d42bcb1f14, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneMinimapHud
+  MapRadius: 500
+  MinimapSize: 180
+  Margin: 20
+  FireRangeReference: 350
+  EnemyDotSize: 4
+  LockedDotSize: 6
+  PlayerMarkerSize: 14
+  EnemyColor: {r: 1, g: 0.2, b: 0.2, a: 1}
+  LockedColor: {r: 1, g: 0.85, b: 0.2, a: 1}
+  PlayerColor: {r: 0.3, g: 1, b: 0.4, a: 1}
+  RingColor: {r: 1, g: 0.3, b: 0.3, a: 0.25}
 --- !u!1 &1730991047
 GameObject:
   m_ObjectHideFlags: 0
@@ -2882,89 +2787,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: -56.077, z: 0}
---- !u!1001 &1967355188
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 729352964}
-    m_Modifications:
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 919132149155446097, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      propertyPath: m_Name
-      value: Plane
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: -1743012734644841813, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 1967355191}
-  m_SourcePrefab: {fileID: 100100000, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
---- !u!4 &1967355189 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-  m_PrefabInstance: {fileID: 1967355188}
-  m_PrefabAsset: {fileID: 0}
---- !u!1 &1967355190 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: -1743012734644841813, guid: 4c0c4e5f19d36cb4d9d9c0aec031342f, type: 3}
-  m_PrefabInstance: {fileID: 1967355188}
-  m_PrefabAsset: {fileID: 0}
---- !u!114 &1967355191
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1967355190}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0b768a18470c9294ab17a1e4bdd730c3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Rotate
-  rotateSpeed: 1200
 --- !u!114 &2055681953
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3550,8 +3372,8 @@ SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 1537200894230138703}
+  - {fileID: 278588889}
   - {fileID: 1656378682}
-  - {fileID: 729352964}
   - {fileID: 365786373}
   - {fileID: 1730991051}
   - {fileID: 1303236327}
