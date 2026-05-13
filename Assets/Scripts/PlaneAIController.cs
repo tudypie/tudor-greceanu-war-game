@@ -18,10 +18,6 @@ public class PlaneAIController : MonoBehaviour
     public float BehindRollAssist = 1f;
     public float BehindPitchAssist = 0.5f;
 
-    [Header("Throttle")]
-    public float BoostDistance = 80f;
-    public float BoostMaxAngleDeg = 35f;
-
     [Header("Firing")]
     public float FireConeDeg = 8f;
     public float FireRange = 350f;
@@ -78,8 +74,7 @@ public class PlaneAIController : MonoBehaviour
         _model.RollInput = _smoothRoll;
         _model.YawInput = _smoothYaw;
 
-        var angleToTargetDeg = Mathf.Acos(Mathf.Clamp(dirLocal.z, -1f, 1f)) * Mathf.Rad2Deg;
-        _model.Boost = distance > BoostDistance && angleToTargetDeg < BoostMaxAngleDeg;
+        _model.Boost = false;
 
         if (_shooter != null)
         {
