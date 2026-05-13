@@ -1,4 +1,4 @@
-# chapter 1
+# chapter 1 - flying
 (maybe) jocul incepe cu interviul lui tudor greceanu, despre lupta -> tehnica memoriei voluntare
 
 ## introducere:
@@ -30,8 +30,16 @@ dupa ce completezi obiectivul din jocul 3 te indrepti intr o directie generala i
 ## deznodamant: 
 poze cu greceanu decorat
 
+### aici s ar incadra cronologic pivotul frontului -> lupta contra Luftwaffe
 
-#  chapter 2
+#  chapter 2 - jail
 cumvaa trebuie facuta trecerea si explicata trimiterea scrisorii catre occident -> motivul arestarii, ziar cu tradator de stat
 idee: tranzitie directa, brusca de la poze cu greceanu decorat la poze cu greceanu persecutat, poate o succesiune rapida de articole din ziar, blurred text ca si cum le ai tranti succesiv pe o masa
  
+ # chapter 3 - interview
+ visual novel style
+ fading between interviewer and greceanu (you)
+ dialogue options: pentru cine ati luptat, domnule greceanu?
+ -pentru tara mea
+ -pentru camarazii mei
+ -nu stiu
