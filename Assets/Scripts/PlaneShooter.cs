@@ -1,9 +1,15 @@
+using System;
 using UnityEngine;
 
 public class PlaneShooter : MonoBehaviour
 {
     Transform _transform;
     LineRenderer _tracer;
+
+    public event Action<float> Hit;
+    public event Action Killed;
+
+    public int Kills { get; private set; }
 
     [HideInInspector] public bool Trigger;
 
@@ -87,7 +93,17 @@ public class PlaneShooter : MonoBehaviour
         {
             endPoint = hit.point;
             var victim = hit.collider.GetComponentInParent<PlaneHealth>();
-            if (victim != null && victim != _ownHealth) victim.TakeDamage(Damage);
+            if (victim != null && victim != _ownHealth)
+            {
+                var wasDead = victim.IsDead;
+                victim.TakeDamage(Damage);
+                Hit?.Invoke(Damage);
+                if (!wasDead && victim.IsDead)
+                {
+                    Kills++;
+                    Killed?.Invoke();
+                }
+            }
         }
         else
         {

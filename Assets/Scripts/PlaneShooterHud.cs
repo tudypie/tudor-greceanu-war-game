@@ -9,6 +9,9 @@ public class PlaneShooterHud : MonoBehaviour
     public float BarHeight = 14f;
     public float BottomMargin = 40f;
 
+    public float KillsTopMargin = 16f;
+    public int KillsFontSize = 22;
+
     void Start()
     {
         _shooter = GetComponent<PlaneShooter>();
@@ -16,6 +19,8 @@ public class PlaneShooterHud : MonoBehaviour
 
     void OnGUI()
     {
+        if (!HudToggle.Visible) return;
+        if (Event.current.type != EventType.Repaint) return;
         if (_shooter == null) return;
 
         var x = (Screen.width - BarWidth) * 0.5f;
@@ -40,5 +45,14 @@ public class PlaneShooterHud : MonoBehaviour
         GUI.skin.label.alignment = TextAnchor.MiddleCenter;
         GUI.Label(labelRect, label);
         GUI.skin.label.alignment = prevAlign;
+
+        var killsRect = new Rect(0f, KillsTopMargin, Screen.width, KillsFontSize + 6f);
+        var prevSize = GUI.skin.label.fontSize;
+        var prevStyleAlign = GUI.skin.label.alignment;
+        GUI.skin.label.fontSize = KillsFontSize;
+        GUI.skin.label.alignment = TextAnchor.UpperCenter;
+        GUI.Label(killsRect, $"KILLS {_shooter.Kills}");
+        GUI.skin.label.fontSize = prevSize;
+        GUI.skin.label.alignment = prevStyleAlign;
     }
 }

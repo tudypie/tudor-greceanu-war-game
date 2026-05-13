@@ -44,10 +44,14 @@ public class PlaneLockOn : MonoBehaviour
     float _lockProgress;
     float _outsideTimer;
 
+    const float EnemyRefreshInterval = 0.25f;
+    float _nextEnemyRefresh;
     static readonly List<PlaneAIController> _enemies = new();
 
     public bool HasLock => _lockedTarget != null && _lockProgress >= 1f;
     public Transform LockedTarget => HasLock ? _lockedTarget : null;
+    public Vector2 CrosshairScreen => _crosshairScreen;
+    public bool CrosshairVisible => _restVisible;
 
     float UiScale => Screen.height / Mathf.Max(1f, ReferenceHeight);
 
@@ -119,9 +123,13 @@ public class PlaneLockOn : MonoBehaviour
 
     Transform FindBestCandidate(Rect box)
     {
-        _enemies.Clear();
-        var found = Object.FindObjectsByType<PlaneAIController>(FindObjectsSortMode.None);
-        _enemies.AddRange(found);
+        if (Time.unscaledTime >= _nextEnemyRefresh)
+        {
+            _enemies.Clear();
+            var found = Object.FindObjectsByType<PlaneAIController>(FindObjectsSortMode.None);
+            _enemies.AddRange(found);
+            _nextEnemyRefresh = Time.unscaledTime + EnemyRefreshInterval;
+        }
 
         Transform best = null;
         var bestScore = float.MaxValue;
@@ -207,6 +215,8 @@ public class PlaneLockOn : MonoBehaviour
 
     void OnGUI()
     {
+        if (!HudToggle.Visible) return;
+        if (Event.current.type != EventType.Repaint) return;
         if (Camera == null || !_restVisible) return;
 
         var s = UiScale;
