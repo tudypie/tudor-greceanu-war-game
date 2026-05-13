@@ -22,6 +22,9 @@ public class PlaneShooter : MonoBehaviour
     public Color TracerColor = new Color(1f, 0.85f, 0.3f, 1f);
     public float TracerWidth = 0.12f;
 
+    [HideInInspector] public bool UseAimDirection;
+    [HideInInspector] public Vector3 AimDirection;
+
     float _heat;
     bool _overheated;
     float _nextFireTime;
@@ -73,7 +76,7 @@ public class PlaneShooter : MonoBehaviour
     void Fire()
     {
         var origin = _transform.position + _transform.forward * MuzzleOffsetZ;
-        var direction = _transform.forward;
+        var direction = UseAimDirection ? AimDirection.normalized : _transform.forward;
 
         Vector3 endPoint;
         if (Physics.Raycast(origin, direction, out var hit, Range, HitMask, QueryTriggerInteraction.Ignore))
