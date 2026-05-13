@@ -21,8 +21,8 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         public float PitchIncreaseSpeed;
         public bool InvertPitch;
         public float RollIncreaseSpeed;
-        public float BarrelRollSpeed;
         public float RollAutoLevelSpeed;
+        public float YawSpeed;
         public float BankTurnSpeed;
         public float CameraSpring;
     }
@@ -42,8 +42,8 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         PitchIncreaseSpeed = t.PitchIncreaseSpeed,
         InvertPitch = t.InvertPitch,
         RollIncreaseSpeed = t.RollIncreaseSpeed,
-        BarrelRollSpeed = t.BarrelRollSpeed,
         RollAutoLevelSpeed = t.RollAutoLevelSpeed,
+        YawSpeed = t.YawSpeed,
         BankTurnSpeed = t.BankTurnSpeed,
         CameraSpring = t.CameraSpring,
     };
@@ -56,8 +56,8 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         t.PitchIncreaseSpeed = s.PitchIncreaseSpeed;
         t.InvertPitch = s.InvertPitch;
         t.RollIncreaseSpeed = s.RollIncreaseSpeed;
-        t.BarrelRollSpeed = s.BarrelRollSpeed;
         t.RollAutoLevelSpeed = s.RollAutoLevelSpeed;
+        t.YawSpeed = s.YawSpeed;
         t.BankTurnSpeed = s.BankTurnSpeed;
         t.CameraSpring = s.CameraSpring;
     }
@@ -69,8 +69,8 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         $"PitchIncreaseSpeed = {s.PitchIncreaseSpeed:0.##}\n" +
         $"InvertPitch = {s.InvertPitch}\n" +
         $"RollIncreaseSpeed = {s.RollIncreaseSpeed:0.##}\n" +
-        $"BarrelRollSpeed = {s.BarrelRollSpeed:0.##}\n" +
         $"RollAutoLevelSpeed = {s.RollAutoLevelSpeed:0.##}\n" +
+        $"YawSpeed = {s.YawSpeed:0.##}\n" +
         $"BankTurnSpeed = {s.BankTurnSpeed:0.##}\n" +
         $"CameraSpring = {s.CameraSpring:0.###}";
 
@@ -103,10 +103,10 @@ public class PlaneControllerDebugMenu : MonoBehaviour
 
         GUILayout.Space(6);
 
-        Target.RollIncreaseSpeed = Slider("Roll Speed (A/D)", Target.RollIncreaseSpeed, _initial.RollIncreaseSpeed, 50f, 900f);
-        Target.BarrelRollSpeed = Slider("Barrel Roll Speed (Q/E)", Target.BarrelRollSpeed, _initial.BarrelRollSpeed, 100f, 1500f);
+        Target.RollIncreaseSpeed = Slider("Roll Speed (A/D)", Target.RollIncreaseSpeed, _initial.RollIncreaseSpeed, 50f, 1500f);
         Target.RollAutoLevelSpeed = Slider("Roll Auto-Level Speed", Target.RollAutoLevelSpeed, _initial.RollAutoLevelSpeed, 0f, 360f);
-        Target.BankTurnSpeed = Slider("Bank Turn Speed", Target.BankTurnSpeed, _initial.BankTurnSpeed, 0f, 360f);
+        Target.YawSpeed = Slider("Yaw Speed (Q/E)", Target.YawSpeed, _initial.YawSpeed, 0f, 180f);
+        Target.BankTurnSpeed = Slider("Bank Turn Speed", Target.BankTurnSpeed, _initial.BankTurnSpeed, 0f, 180f);
 
         GUILayout.Space(6);
 

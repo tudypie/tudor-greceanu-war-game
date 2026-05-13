@@ -2088,12 +2088,12 @@ MonoBehaviour:
   NormalThrust: 600
   MaxThrust: 1200
   ThrustAgilityMultiplier: 1.8
-  PitchIncreaseSpeed: 150
+  PitchIncreaseSpeed: 60
   InvertPitch: 0
-  RollIncreaseSpeed: 150
-  BarrelRollSpeed: 420
+  RollIncreaseSpeed: 60
   RollAutoLevelSpeed: 0
-  BankTurnSpeed: 60
+  YawSpeed: 30
+  BankTurnSpeed: 15
 --- !u!54 &1656378681
 Rigidbody:
   m_ObjectHideFlags: 0

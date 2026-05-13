@@ -23,14 +23,12 @@ public class PlaneController : MonoBehaviour
     public bool InvertPitch = true;
 
     float _deltaRoll;
-    public float RollIncreaseSpeed = 300f;
-    public float BarrelRollSpeed = 720f;
+    public float RollIncreaseSpeed = 420f;
     public float RollAutoLevelSpeed = 120f;
 
     float _deltaYaw;
-    public float BankTurnSpeed = 60f;
-
-    bool _worldPitch;
+    public float YawSpeed = 30f;
+    public float BankTurnSpeed = 15f;
 
     void Awake()
     {
@@ -71,50 +69,30 @@ public class PlaneController : MonoBehaviour
         _deltaPitch = (InvertPitch ? -move.y : move.y) * PitchIncreaseSpeed * agility * dt;
 
         var keyboard = Keyboard.current;
-        var barrelRollDir = 0f;
+        var yawInput = 0f;
         if (keyboard != null)
         {
-            if (keyboard.qKey.isPressed) barrelRollDir += 1f;
-            if (keyboard.eKey.isPressed) barrelRollDir -= 1f;
+            if (keyboard.eKey.isPressed) yawInput += 1f;
+            if (keyboard.qKey.isPressed) yawInput -= 1f;
         }
 
         var bank = _transform.right.y;
-        _worldPitch = barrelRollDir != 0f;
-        if (barrelRollDir != 0f)
+
+        if (Mathf.Approximately(move.x, 0f))
         {
-            _deltaRoll = barrelRollDir * BarrelRollSpeed * agility * dt;
-            _deltaYaw = 0f;
+            _deltaRoll = -bank * RollAutoLevelSpeed * agility * dt;
         }
         else
         {
-            if (Mathf.Approximately(move.x, 0f))
-            {
-                _deltaRoll = -bank * RollAutoLevelSpeed * agility * dt;
-            }
-            else
-            {
-                _deltaRoll = -move.x * RollIncreaseSpeed * agility * dt;
-            }
-
-            _deltaYaw = -bank * BankTurnSpeed * agility * dt;
+            _deltaRoll = -move.x * RollIncreaseSpeed * agility * dt;
         }
+
+        _deltaYaw = (yawInput * YawSpeed - bank * BankTurnSpeed) * agility * dt;
 
         var localRotation = _transform.localRotation;
         localRotation *= Quaternion.Euler(0f, 0f, _deltaRoll);
-        if (!_worldPitch)
-        {
-            localRotation *= Quaternion.Euler(_deltaPitch, 0f, 0f);
-        }
+        localRotation *= Quaternion.Euler(_deltaPitch, 0f, 0f);
         _transform.localRotation = localRotation;
-
-        if (_worldPitch)
-        {
-            Vector3 pitchAxis = Vector3.Cross(Vector3.up, _transform.forward);
-            if (pitchAxis.sqrMagnitude > 0.0001f)
-            {
-                _transform.Rotate(pitchAxis.normalized, _deltaPitch, Space.World);
-            }
-        }
 
         _transform.Rotate(Vector3.up, _deltaYaw, Space.World);
         var thrust = _jumpAction.IsPressed() ? MaxThrust : NormalThrust;
