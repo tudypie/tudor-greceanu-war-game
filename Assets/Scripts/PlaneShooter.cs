@@ -1,12 +1,11 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 public class PlaneShooter : MonoBehaviour
 {
     Transform _transform;
-    Controls _controls;
-    InputAction _attackAction;
     LineRenderer _tracer;
+
+    [HideInInspector] public bool Trigger;
 
     public float Range = 400f;
     public float FireInterval = 0.08f;
@@ -36,17 +35,10 @@ public class PlaneShooter : MonoBehaviour
 
     void Awake()
     {
-        _controls = new Controls();
-        _attackAction = _controls.Player.Attack;
-
         _tracer = GetComponent<LineRenderer>();
         if (_tracer == null) _tracer = gameObject.AddComponent<LineRenderer>();
         ConfigureTracer();
     }
-
-    void OnEnable() { _controls.Player.Enable(); }
-    void OnDisable() { _controls.Player.Disable(); }
-    void OnDestroy() { _controls?.Dispose(); }
 
     void Start()
     {
@@ -56,15 +48,14 @@ public class PlaneShooter : MonoBehaviour
     void Update()
     {
         var dt = Time.deltaTime;
-        var triggerHeld = _attackAction.IsPressed();
 
-        if (triggerHeld && !_overheated && Time.time >= _nextFireTime)
+        if (Trigger && !_overheated && Time.time >= _nextFireTime)
         {
             Fire();
             _nextFireTime = Time.time + FireInterval;
         }
 
-        if (!triggerHeld || _overheated)
+        if (!Trigger || _overheated)
         {
             var cool = _overheated ? OverheatedCoolPerSecond : CoolPerSecond;
             _heat = Mathf.Max(0f, _heat - cool * dt);

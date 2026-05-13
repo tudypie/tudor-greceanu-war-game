@@ -3,7 +3,8 @@ using UnityEngine.InputSystem;
 
 public class PlaneControllerDebugMenu : MonoBehaviour
 {
-    public PlaneController Target;
+    public PlaneFlightModel Target;
+    public PlaneCameraFollow CameraFollow;
     public Key ToggleKey = Key.F1;
     public bool VisibleOnStart = false;
 
@@ -30,11 +31,12 @@ public class PlaneControllerDebugMenu : MonoBehaviour
     void Start()
     {
         _visible = VisibleOnStart;
-        if (Target == null) Target = FindFirstObjectByType<PlaneController>();
-        if (Target != null) _initial = Capture(Target);
+        if (Target == null) Target = FindFirstObjectByType<PlaneFlightModel>();
+        if (Target != null && CameraFollow == null) CameraFollow = Target.GetComponent<PlaneCameraFollow>();
+        if (Target != null) _initial = Capture(Target, CameraFollow);
     }
 
-    static Snapshot Capture(PlaneController t) => new Snapshot
+    static Snapshot Capture(PlaneFlightModel t, PlaneCameraFollow cam) => new Snapshot
     {
         NormalThrust = t.NormalThrust,
         MaxThrust = t.MaxThrust,
@@ -45,10 +47,10 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         RollAutoLevelSpeed = t.RollAutoLevelSpeed,
         YawSpeed = t.YawSpeed,
         BankTurnSpeed = t.BankTurnSpeed,
-        CameraSpring = t.CameraSpring,
+        CameraSpring = cam != null ? cam.CameraSpring : 0f,
     };
 
-    static void Apply(PlaneController t, Snapshot s)
+    static void Apply(PlaneFlightModel t, PlaneCameraFollow cam, Snapshot s)
     {
         t.NormalThrust = s.NormalThrust;
         t.MaxThrust = s.MaxThrust;
@@ -59,7 +61,7 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         t.RollAutoLevelSpeed = s.RollAutoLevelSpeed;
         t.YawSpeed = s.YawSpeed;
         t.BankTurnSpeed = s.BankTurnSpeed;
-        t.CameraSpring = s.CameraSpring;
+        if (cam != null) cam.CameraSpring = s.CameraSpring;
     }
 
     static string Format(Snapshot s) =>
@@ -108,20 +110,22 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         Target.YawSpeed = Slider("Yaw Speed (Q/E)", Target.YawSpeed, _initial.YawSpeed, 0f, 180f);
         Target.BankTurnSpeed = Slider("Bank Turn Speed", Target.BankTurnSpeed, _initial.BankTurnSpeed, 0f, 180f);
 
-        GUILayout.Space(6);
-
-        Target.CameraSpring = Slider("Camera Spring", Target.CameraSpring, _initial.CameraSpring, 0f, 1f);
+        if (CameraFollow != null)
+        {
+            GUILayout.Space(6);
+            CameraFollow.CameraSpring = Slider("Camera Spring", CameraFollow.CameraSpring, _initial.CameraSpring, 0f, 1f);
+        }
 
         GUILayout.Space(10);
 
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("Reset"))
         {
-            Apply(Target, _initial);
+            Apply(Target, CameraFollow, _initial);
         }
         if (GUILayout.Button("Export"))
         {
-            var text = Format(Capture(Target));
+            var text = Format(Capture(Target, CameraFollow));
             GUIUtility.systemCopyBuffer = text;
             Debug.Log("Plane settings:\n" + text);
             _exportStatus = "Copied to clipboard + logged";
