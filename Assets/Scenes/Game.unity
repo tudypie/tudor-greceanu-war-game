@@ -3003,6 +3003,14 @@ PrefabInstance:
       propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 8f0e4742300904040b3c3a0a204ad13b, type: 2}
+    - target: {fileID: 3835316405913478642, guid: 2795a176e6344c14892deadca670c8a9, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 10965823696d70d46ac059bb27c8d932, type: 2}
+    - target: {fileID: 5052631801063268681, guid: 2795a176e6344c14892deadca670c8a9, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 10965823696d70d46ac059bb27c8d932, type: 2}
     - target: {fileID: 5918659426635289925, guid: 2795a176e6344c14892deadca670c8a9, type: 3}
       propertyPath: m_Name
       value: Plane RO
