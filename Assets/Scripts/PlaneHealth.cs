@@ -1,10 +1,18 @@
 using System;
 using UnityEngine;
 
+public enum PlaneFaction
+{
+    Player,
+    Ally,
+    Enemy,
+}
+
 public class PlaneHealth : MonoBehaviour
 {
-    public float MaxHealth = 100f;
+    public PlaneHealthStats Stats;
     public bool DestroyOnDeath = true;
+    public PlaneFaction Faction = PlaneFaction.Enemy;
 
     float _health;
     bool _dead;
@@ -13,12 +21,29 @@ public class PlaneHealth : MonoBehaviour
     public event Action<float> Damaged;
 
     public float Health => _health;
+    public float MaxHealth => Stats != null ? Stats.MaxHealth : 0f;
     public float HealthNormalized => Mathf.Clamp01(_health / Mathf.Max(MaxHealth, 0.0001f));
     public bool IsDead => _dead;
 
+    public static bool AreHostile(PlaneFaction a, PlaneFaction b)
+    {
+        if (a == b) return false;
+        return a == PlaneFaction.Enemy || b == PlaneFaction.Enemy;
+    }
+
+    public bool IsHostileTo(PlaneHealth other)
+    {
+        return other != null && AreHostile(Faction, other.Faction);
+    }
+
     void Awake()
     {
-        _health = MaxHealth;
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneHealth)} on {name} has no Stats assigned.", this);
+            return;
+        }
+        _health = Stats.MaxHealth;
     }
 
     public void TakeDamage(float amount)
@@ -37,6 +62,7 @@ public class PlaneHealth : MonoBehaviour
     {
         _dead = true;
         Died?.Invoke();
+        Debug.Log($"{gameObject.name} died");
         if (DestroyOnDeath) Destroy(gameObject);
     }
 }

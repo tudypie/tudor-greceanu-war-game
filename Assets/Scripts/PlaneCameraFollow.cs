@@ -5,31 +5,30 @@ public class PlaneCameraFollow : MonoBehaviour
 {
     Transform _transform;
 
+    public PlaneCameraStats Stats;
     public Camera Camera;
     public Transform CameraTarget;
-    public Vector3 FollowOffset = new Vector3(0f, 3f, -8f);
-
-    [Header("Mouse Look")]
-    public Vector2 MouseSensitivity = new Vector2(0.2f, 0.15f);
-    public bool InvertY = false;
-    public float MinPitch = -60f;
-    public float MaxPitch = 75f;
-
-    [Header("Smoothing")]
-    [Range(0f, 1f)] public float CameraSpring = 0.92f;
-
-    [Header("Cursor")]
-    public bool LockCursor = true;
 
     float _yawOffset;
     float _pitchOffset;
     float _lastHeadingDeg;
 
+    public float CameraSpring
+    {
+        get => Stats != null ? Stats.CameraSpring : 0f;
+        set { if (Stats != null) Stats.CameraSpring = value; }
+    }
+
     void Start()
     {
         _transform = transform;
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneCameraFollow)} on {name} has no Stats assigned.", this);
+            return;
+        }
         if (Camera != null) Camera.transform.SetParent(null);
-        if (LockCursor)
+        if (Stats.LockCursor)
         {
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
@@ -39,7 +38,7 @@ public class PlaneCameraFollow : MonoBehaviour
 
     void LateUpdate()
     {
-        if (Camera == null) return;
+        if (Camera == null || Stats == null) return;
 
         ReadMouseLook();
 
@@ -47,9 +46,9 @@ public class PlaneCameraFollow : MonoBehaviour
         _lastHeadingDeg = headingDeg;
 
         var orbit = Quaternion.Euler(_pitchOffset, headingDeg + _yawOffset, 0f);
-        var targetPos = _transform.position + orbit * FollowOffset;
+        var targetPos = _transform.position + orbit * Stats.FollowOffset;
 
-        var spring = Mathf.Clamp01(CameraSpring);
+        var spring = Mathf.Clamp01(Stats.CameraSpring);
         var alpha = 1f - Mathf.Pow(spring, Time.deltaTime * 60f);
 
         var cam = Camera.transform;
@@ -67,10 +66,10 @@ public class PlaneCameraFollow : MonoBehaviour
         var delta = mouse.delta.ReadValue();
         if (delta.sqrMagnitude <= 0.0001f) return;
 
-        _yawOffset += delta.x * MouseSensitivity.x;
-        var pitchDelta = delta.y * MouseSensitivity.y;
-        _pitchOffset += InvertY ? pitchDelta : -pitchDelta;
-        _pitchOffset = Mathf.Clamp(_pitchOffset, MinPitch, MaxPitch);
+        _yawOffset += delta.x * Stats.MouseSensitivity.x;
+        var pitchDelta = delta.y * Stats.MouseSensitivity.y;
+        _pitchOffset += Stats.InvertY ? pitchDelta : -pitchDelta;
+        _pitchOffset = Mathf.Clamp(_pitchOffset, Stats.MinPitch, Stats.MaxPitch);
     }
 
     static float HeadingFromForward(Vector3 forward, float fallbackDeg)

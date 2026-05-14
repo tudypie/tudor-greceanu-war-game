@@ -4,19 +4,8 @@ using UnityEngine;
 [RequireComponent(typeof(PlaneHealth))]
 public class PlaneCameraShake : MonoBehaviour
 {
+    public PlaneCameraShakeStats Stats;
     public Camera Camera;
-
-    [Tooltip("Peak angular shake in degrees at full intensity.")]
-    public float Magnitude = 1.6f;
-
-    [Tooltip("How long a shake takes to fully decay.")]
-    public float Duration = 0.35f;
-
-    [Tooltip("Damage amount that produces a full-magnitude shake. Smaller hits scale down linearly.")]
-    public float DamageReference = 25f;
-
-    [Tooltip("Noise sample rate — higher = more jittery, lower = more swaying.")]
-    public float Frequency = 28f;
 
     PlaneHealth _health;
     float _shakeStart = -999f;
@@ -27,6 +16,10 @@ public class PlaneCameraShake : MonoBehaviour
     {
         _health = GetComponent<PlaneHealth>();
         _seed = Random.value * 1000f;
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneCameraShake)} on {name} has no Stats assigned.", this);
+        }
     }
 
     void Start()
@@ -51,7 +44,8 @@ public class PlaneCameraShake : MonoBehaviour
 
     void OnDamaged(float amount)
     {
-        var intensity = Mathf.Clamp01(amount / Mathf.Max(0.0001f, DamageReference));
+        if (Stats == null) return;
+        var intensity = Mathf.Clamp01(amount / Mathf.Max(0.0001f, Stats.DamageReference));
         var remaining = _shakeAmount * RemainingFraction();
         if (intensity > remaining)
         {
@@ -62,19 +56,19 @@ public class PlaneCameraShake : MonoBehaviour
 
     float RemainingFraction()
     {
-        if (Duration <= 0f) return 0f;
-        var t = (Time.time - _shakeStart) / Duration;
+        if (Stats == null || Stats.Duration <= 0f) return 0f;
+        var t = (Time.time - _shakeStart) / Stats.Duration;
         return Mathf.Clamp01(1f - t);
     }
 
     void LateUpdate()
     {
-        if (Camera == null) return;
+        if (Camera == null || Stats == null) return;
         var remaining = RemainingFraction();
         if (remaining <= 0f || _shakeAmount <= 0f) return;
 
-        var amp = _shakeAmount * remaining * Magnitude;
-        var t = (Time.time - _shakeStart) * Frequency;
+        var amp = _shakeAmount * remaining * Stats.Magnitude;
+        var t = (Time.time - _shakeStart) * Stats.Frequency;
         var pitch = (Mathf.PerlinNoise(_seed, t) - 0.5f) * 2f * amp;
         var yaw = (Mathf.PerlinNoise(_seed + 13f, t) - 0.5f) * 2f * amp;
         var roll = (Mathf.PerlinNoise(_seed + 29f, t) - 0.5f) * amp;

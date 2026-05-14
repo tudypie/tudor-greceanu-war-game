@@ -3,52 +3,47 @@ using UnityEngine;
 
 public class PlaneMinimapHud : MonoBehaviour
 {
-    [Header("Map")]
-    public float MapRadius = 500f;
-    public float MinimapSize = 180f;
-    public float Margin = 20f;
-    public float FireRangeReference = 350f;
-
-    [Header("Markers")]
-    public float EnemyDotSize = 4f;
-    public float LockedDotSize = 6f;
-    public float PlayerMarkerSize = 14f;
-    public float EnemyArrowSize = 9f;
-    public float LockedArrowSize = 12f;
-    [Tooltip("Vertical separation (world units) at which an enemy is treated as 'above' or 'below' rather than 'level'.")]
-    public float AltitudeThreshold = 15f;
-
-    [Header("Colors")]
-    public Color EnemyColor = new Color(1f, 0.2f, 0.2f, 1f);
-    public Color LockedColor = new Color(1f, 0.85f, 0.2f, 1f);
-    public Color PlayerColor = new Color(0.3f, 1f, 0.4f, 1f);
-    public Color RingColor = new Color(1f, 0.3f, 0.3f, 0.25f);
+    public PlaneMinimapStats Stats;
 
     const float RefreshInterval = 0.25f;
 
     PlaneLockOn _lockOn;
+    PlaneHealth _ownHealth;
     Texture2D _ringTex;
     Texture2D _triangleTex;
     Texture2D _upArrowTex;
     Texture2D _downArrowTex;
-    readonly List<PlaneAIController> _enemies = new List<PlaneAIController>();
+    readonly List<PlaneHealth> _hostiles = new List<PlaneHealth>();
+    readonly List<PlaneHealth> _allies = new List<PlaneHealth>();
     float _nextRefresh;
 
     void Start()
     {
         _lockOn = GetComponent<PlaneLockOn>();
+        _ownHealth = GetComponent<PlaneHealth>();
         _ringTex = BakeRing(128, 2, Color.white);
         _triangleTex = BakeTriangle(16, Color.white, true);
         _upArrowTex = BakeTriangle(16, Color.white, true);
         _downArrowTex = BakeTriangle(16, Color.white, false);
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneMinimapHud)} on {name} has no Stats assigned.", this);
+        }
     }
 
     void Update()
     {
         if (Time.unscaledTime < _nextRefresh) return;
-        _enemies.Clear();
-        var found = FindObjectsByType<PlaneAIController>(FindObjectsSortMode.None);
-        for (int i = 0; i < found.Length; i++) _enemies.Add(found[i]);
+        _hostiles.Clear();
+        _allies.Clear();
+        var found = FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
+        for (int i = 0; i < found.Length; i++)
+        {
+            var ph = found[i];
+            if (ph == null || ph == _ownHealth) continue;
+            if (_ownHealth != null && _ownHealth.IsHostileTo(ph)) _hostiles.Add(ph);
+            else _allies.Add(ph);
+        }
         _nextRefresh = Time.unscaledTime + RefreshInterval;
     }
 
@@ -56,17 +51,19 @@ public class PlaneMinimapHud : MonoBehaviour
     {
         if (!HudToggle.Visible) return;
         if (Event.current.type != EventType.Repaint) return;
-        float halfPx = MinimapSize * 0.5f;
-        float cx = Screen.width - Margin - halfPx;
-        float cy = Margin + halfPx;
+        if (Stats == null) return;
 
-        var boxRect = new Rect(cx - halfPx, cy - halfPx, MinimapSize, MinimapSize);
+        float halfPx = Stats.MinimapSize * 0.5f;
+        float cx = Screen.width - Stats.Margin - halfPx;
+        float cy = Stats.Margin + halfPx;
+
+        var boxRect = new Rect(cx - halfPx, cy - halfPx, Stats.MinimapSize, Stats.MinimapSize);
         GUI.Box(boxRect, GUIContent.none);
 
-        float ringPx = Mathf.Min(MinimapSize, (FireRangeReference / MapRadius) * MinimapSize);
+        float ringPx = Mathf.Min(Stats.MinimapSize, (Stats.FireRangeReference / Stats.MapRadius) * Stats.MinimapSize);
         var ringRect = new Rect(cx - ringPx * 0.5f, cy - ringPx * 0.5f, ringPx, ringPx);
         var prev = GUI.color;
-        GUI.color = RingColor;
+        GUI.color = Stats.RingColor;
         GUI.DrawTexture(ringRect, _ringTex);
         GUI.color = prev;
 
@@ -78,31 +75,75 @@ public class PlaneMinimapHud : MonoBehaviour
         Vector3 origin = transform.position;
         Transform locked = _lockOn != null ? _lockOn.LockedTarget : null;
 
-        prev = GUI.color;
-        GUI.color = EnemyColor;
-        for (int i = 0; i < _enemies.Count; i++)
+        float twoPi = Mathf.PI * 2f;
+        float sweepPeriod = Mathf.Max(0.01f, Stats.SweepPeriod);
+        float fadeDuration = Mathf.Max(0.01f, Stats.PingFadeDuration);
+        float sweepAngle = Mathf.Repeat(Time.unscaledTime / sweepPeriod, 1f) * twoPi;
+
+        if (Stats.ShowSweepLine)
         {
-            var enemy = _enemies[i];
-            if (enemy == null) continue;
-            if (enemy.transform == locked) continue;
-            if (!ProjectToMinimap(enemy.transform.position, origin, cosY, sinY, cx, cy, halfPx, false, out Vector2 dot)) continue;
-            PickAltitudeIcon(enemy.transform.position.y - origin.y, EnemyDotSize, EnemyArrowSize, out Texture2D tex, out float size);
+            Matrix4x4 sweepBackup = GUI.matrix;
+            GUIUtility.RotateAroundPivot(sweepAngle * Mathf.Rad2Deg - 90f, new Vector2(cx, cy));
+            prev = GUI.color;
+            GUI.color = Stats.SweepLineColor;
+            GUI.DrawTexture(new Rect(cx, cy - Stats.SweepLineThickness * 0.5f, halfPx, Stats.SweepLineThickness), Texture2D.whiteTexture);
+            GUI.color = prev;
+            GUI.matrix = sweepBackup;
+        }
+
+        for (int i = 0; i < _hostiles.Count; i++)
+        {
+            var hostile = _hostiles[i];
+            if (hostile == null || hostile.IsDead) continue;
+            if (hostile.transform == locked) continue;
+
+            Vector3 epos = hostile.transform.position;
+            float dx = epos.x - origin.x;
+            float dz = epos.z - origin.z;
+            float lx = dx * cosY - dz * sinY;
+            float ly = dx * sinY + dz * cosY;
+            float bearing = Mathf.Atan2(lx, ly);
+            if (bearing < 0f) bearing += twoPi;
+            float delta = Mathf.Repeat(sweepAngle - bearing, twoPi);
+            float timeSincePing = delta / twoPi * sweepPeriod;
+            float alpha = 1f - timeSincePing / fadeDuration;
+            if (alpha <= 0f) continue;
+
+            if (!ProjectToMinimap(epos, origin, cosY, sinY, cx, cy, halfPx, false, out Vector2 dot)) continue;
+
+            var c = Stats.EnemyColor;
+            c.a *= alpha;
+            GUI.color = c;
+            PickAltitudeIcon(epos.y - origin.y, Stats.EnemyDotSize, Stats.EnemyArrowSize, out Texture2D tex, out float size);
             DrawIcon(dot, size, tex);
         }
-        GUI.color = prev;
+
+        for (int i = 0; i < _allies.Count; i++)
+        {
+            var ally = _allies[i];
+            if (ally == null || ally.IsDead) continue;
+
+            Vector3 apos = ally.transform.position;
+            if (!ProjectToMinimap(apos, origin, cosY, sinY, cx, cy, halfPx, false, out Vector2 dot)) continue;
+
+            GUI.color = Stats.AllyColor;
+            PickAltitudeIcon(apos.y - origin.y, Stats.EnemyDotSize, Stats.EnemyArrowSize, out Texture2D tex, out float size);
+            DrawIcon(dot, size, tex);
+        }
+        GUI.color = Color.white;
 
         if (locked != null && ProjectToMinimap(locked.position, origin, cosY, sinY, cx, cy, halfPx, true, out Vector2 lockedDot))
         {
             prev = GUI.color;
-            GUI.color = LockedColor;
-            PickAltitudeIcon(locked.position.y - origin.y, LockedDotSize, LockedArrowSize, out Texture2D lockedTex, out float lockedSize);
+            GUI.color = Stats.LockedColor;
+            PickAltitudeIcon(locked.position.y - origin.y, Stats.LockedDotSize, Stats.LockedArrowSize, out Texture2D lockedTex, out float lockedSize);
             DrawIcon(lockedDot, lockedSize, lockedTex);
             GUI.color = prev;
         }
 
         prev = GUI.color;
-        GUI.color = PlayerColor;
-        var pRect = new Rect(cx - PlayerMarkerSize * 0.5f, cy - PlayerMarkerSize * 0.5f, PlayerMarkerSize, PlayerMarkerSize);
+        GUI.color = Stats.PlayerColor;
+        var pRect = new Rect(cx - Stats.PlayerMarkerSize * 0.5f, cy - Stats.PlayerMarkerSize * 0.5f, Stats.PlayerMarkerSize, Stats.PlayerMarkerSize);
         GUI.DrawTexture(pRect, _triangleTex);
         GUI.color = prev;
     }
@@ -115,8 +156,8 @@ public class PlaneMinimapHud : MonoBehaviour
 
     void PickAltitudeIcon(float dy, float dotSize, float arrowSize, out Texture2D tex, out float size)
     {
-        if (dy > AltitudeThreshold) { tex = _upArrowTex; size = arrowSize; }
-        else if (dy < -AltitudeThreshold) { tex = _downArrowTex; size = arrowSize; }
+        if (dy > Stats.AltitudeThreshold) { tex = _upArrowTex; size = arrowSize; }
+        else if (dy < -Stats.AltitudeThreshold) { tex = _downArrowTex; size = arrowSize; }
         else { tex = Texture2D.whiteTexture; size = dotSize; }
     }
 
@@ -129,17 +170,17 @@ public class PlaneMinimapHud : MonoBehaviour
         float ly = dx * sinY + dz * cosY;
 
         float distSq = lx * lx + ly * ly;
-        float rSq = MapRadius * MapRadius;
+        float rSq = Stats.MapRadius * Stats.MapRadius;
 
         if (distSq > rSq)
         {
             if (!clampToEdge) { guiPos = default; return false; }
             float dist = Mathf.Sqrt(distSq);
-            lx = lx / dist * MapRadius;
-            ly = ly / dist * MapRadius;
+            lx = lx / dist * Stats.MapRadius;
+            ly = ly / dist * Stats.MapRadius;
         }
 
-        guiPos = new Vector2(cx + (lx / MapRadius) * halfPx, cy - (ly / MapRadius) * halfPx);
+        guiPos = new Vector2(cx + (lx / Stats.MapRadius) * halfPx, cy - (ly / Stats.MapRadius) * halfPx);
         return true;
     }
 

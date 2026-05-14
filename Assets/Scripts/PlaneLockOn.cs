@@ -6,36 +6,10 @@ public class PlaneLockOn : MonoBehaviour
 {
     Transform _transform;
     PlaneShooter _shooter;
+    PlaneHealth _ownHealth;
 
+    public PlaneLockOnStats Stats;
     public Camera Camera;
-
-    [Header("Reticle Box (px @ 1080p)")]
-    public float BoxWidth = 360f;
-    public float BoxHeight = 280f;
-
-    [Header("Crosshair")]
-    [Tooltip("Distance ahead of the plane used to project the free crosshair position.")]
-    public float CrosshairRange = 300f;
-    [Tooltip("Higher = the crosshair catches up to its target screen position faster.")]
-    public float CrosshairSmoothing = 12f;
-    [Tooltip("Crosshair arm length in pixels at 1080p — scales with resolution.")]
-    public float CrosshairSize = 18f;
-    [Tooltip("Line thickness in pixels at 1080p — scales with resolution.")]
-    public float LineThickness = 2f;
-    [Tooltip("Reference screen height the px values were authored against.")]
-    public float ReferenceHeight = 1080f;
-
-    [Header("Lock-On")]
-    public float MaxLockDistance = 800f;
-    [Tooltip("Time the target must stay inside the box for a lock to complete.")]
-    public float AcquireTime = 0.25f;
-    [Tooltip("Time the target can stay outside the box before the lock drops.")]
-    public float LoseGrace = 0.35f;
-
-    [Header("Colors")]
-    public Color BoxColor = new Color(1f, 1f, 1f, 0.35f);
-    public Color CrosshairColor = new Color(1f, 1f, 1f, 0.9f);
-    public Color LockColor = new Color(1f, 0.25f, 0.25f, 1f);
 
     Vector2 _restScreen;
     Vector2 _crosshairScreen;
@@ -46,19 +20,27 @@ public class PlaneLockOn : MonoBehaviour
 
     const float EnemyRefreshInterval = 0.25f;
     float _nextEnemyRefresh;
-    static readonly List<PlaneAIController> _enemies = new();
+    static readonly List<PlaneHealth> _hostiles = new();
 
     public bool HasLock => _lockedTarget != null && _lockProgress >= 1f;
     public Transform LockedTarget => HasLock ? _lockedTarget : null;
     public Vector2 CrosshairScreen => _crosshairScreen;
     public bool CrosshairVisible => _restVisible;
 
-    float UiScale => Screen.height / Mathf.Max(1f, ReferenceHeight);
+    float UiScale => Stats != null
+        ? Screen.height / Mathf.Max(1f, Stats.ReferenceHeight)
+        : 1f;
 
     void Start()
     {
         _transform = transform;
         _shooter = GetComponent<PlaneShooter>();
+        _ownHealth = GetComponent<PlaneHealth>();
+
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneLockOn)} on {name} has no Stats assigned.", this);
+        }
 
         if (Camera == null)
         {
@@ -74,11 +56,11 @@ public class PlaneLockOn : MonoBehaviour
 
     void Update()
     {
-        if (Camera == null) return;
+        if (Camera == null || Stats == null) return;
 
-        var alpha = 1f - Mathf.Exp(-CrosshairSmoothing * Time.deltaTime);
+        var alpha = 1f - Mathf.Exp(-Stats.CrosshairSmoothing * Time.deltaTime);
 
-        var sp = Camera.WorldToScreenPoint(_transform.position + _transform.forward * CrosshairRange);
+        var sp = Camera.WorldToScreenPoint(_transform.position + _transform.forward * Stats.CrosshairRange);
         _restVisible = sp.z > 0f;
 
         if (_restVisible)
@@ -116,8 +98,8 @@ public class PlaneLockOn : MonoBehaviour
     Rect GetBoxRect()
     {
         var s = UiScale;
-        var w = BoxWidth * s;
-        var h = BoxHeight * s;
+        var w = Stats.BoxWidth * s;
+        var h = Stats.BoxHeight * s;
         return new Rect(_restScreen.x - w * 0.5f, _restScreen.y - h * 0.5f, w, h);
     }
 
@@ -125,9 +107,15 @@ public class PlaneLockOn : MonoBehaviour
     {
         if (Time.unscaledTime >= _nextEnemyRefresh)
         {
-            _enemies.Clear();
-            var found = Object.FindObjectsByType<PlaneAIController>(FindObjectsSortMode.None);
-            _enemies.AddRange(found);
+            _hostiles.Clear();
+            var found = Object.FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
+            for (int i = 0; i < found.Length; i++)
+            {
+                var ph = found[i];
+                if (ph == null || ph == _ownHealth) continue;
+                if (_ownHealth != null && !_ownHealth.IsHostileTo(ph)) continue;
+                _hostiles.Add(ph);
+            }
             _nextEnemyRefresh = Time.unscaledTime + EnemyRefreshInterval;
         }
 
@@ -136,14 +124,15 @@ public class PlaneLockOn : MonoBehaviour
         var planePos = _transform.position;
         var planeFwd = _transform.forward;
 
-        foreach (var enemy in _enemies)
+        foreach (var hostile in _hostiles)
         {
-            if (enemy == null || enemy.transform == _transform) continue;
+            if (hostile == null || hostile.IsDead) continue;
 
-            var t = enemy.transform;
+            var t = hostile.transform;
+            if (t == _transform) continue;
             var toEnemy = t.position - planePos;
             var dist = toEnemy.magnitude;
-            if (dist > MaxLockDistance || dist < 0.001f) continue;
+            if (dist > Stats.MaxLockDistance || dist < 0.001f) continue;
             if (Vector3.Dot(toEnemy, planeFwd) <= 0f) continue;
 
             var sp = Camera.WorldToScreenPoint(t.position);
@@ -175,12 +164,12 @@ public class PlaneLockOn : MonoBehaviour
                 _lockProgress = 0f;
             }
             _outsideTimer = 0f;
-            _lockProgress = Mathf.Clamp01(_lockProgress + Time.deltaTime / Mathf.Max(0.0001f, AcquireTime));
+            _lockProgress = Mathf.Clamp01(_lockProgress + Time.deltaTime / Mathf.Max(0.0001f, Stats.AcquireTime));
         }
         else
         {
             _outsideTimer += Time.deltaTime;
-            if (_outsideTimer >= LoseGrace)
+            if (_outsideTimer >= Stats.LoseGrace)
             {
                 _lockedTarget = null;
                 _lockProgress = 0f;
@@ -211,27 +200,25 @@ public class PlaneLockOn : MonoBehaviour
         }
     }
 
-    // ---- HUD ----
-
     void OnGUI()
     {
         if (!HudToggle.Visible) return;
         if (Event.current.type != EventType.Repaint) return;
-        if (Camera == null || !_restVisible) return;
+        if (Camera == null || !_restVisible || Stats == null) return;
 
         var s = UiScale;
         var box = GetBoxRect();
         var guiBox = ScreenToGuiRect(box);
 
-        DrawBox(guiBox, BoxColor, Mathf.Max(1f, 2f * s));
+        DrawBox(guiBox, Stats.BoxColor, Mathf.Max(1f, 2f * s));
 
         var crossColor = HasLock
-            ? LockColor
-            : (_lockedTarget != null ? Color.Lerp(CrosshairColor, LockColor, _lockProgress) : CrosshairColor);
+            ? Stats.LockColor
+            : (_lockedTarget != null ? Color.Lerp(Stats.CrosshairColor, Stats.LockColor, _lockProgress) : Stats.CrosshairColor);
 
         var cross = new Vector2(_crosshairScreen.x, Screen.height - _crosshairScreen.y);
-        var size = CrosshairSize * s;
-        var thickness = Mathf.Max(1f, LineThickness * s);
+        var size = Stats.CrosshairSize * s;
+        var thickness = Mathf.Max(1f, Stats.LineThickness * s);
         DrawCrosshair(cross, size, thickness, crossColor);
 
         if (_lockedTarget != null) DrawLockBrackets(cross, size * 1.15f, thickness, crossColor, _lockProgress);
@@ -273,16 +260,12 @@ public class PlaneLockOn : MonoBehaviour
         var tex = Texture2D.whiteTexture;
         var arm = size * 0.45f;
 
-        // top-left
         GUI.DrawTexture(new Rect(pos.x - size, pos.y - size, arm, t), tex);
         GUI.DrawTexture(new Rect(pos.x - size, pos.y - size, t, arm), tex);
-        // top-right
         GUI.DrawTexture(new Rect(pos.x + size - arm, pos.y - size, arm, t), tex);
         GUI.DrawTexture(new Rect(pos.x + size - t, pos.y - size, t, arm), tex);
-        // bottom-left
         GUI.DrawTexture(new Rect(pos.x - size, pos.y + size - t, arm, t), tex);
         GUI.DrawTexture(new Rect(pos.x - size, pos.y + size - arm, t, arm), tex);
-        // bottom-right
         GUI.DrawTexture(new Rect(pos.x + size - arm, pos.y + size - t, arm, t), tex);
         GUI.DrawTexture(new Rect(pos.x + size - t, pos.y + size - arm, t, arm), tex);
         GUI.color = prev;

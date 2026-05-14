@@ -13,23 +13,9 @@ public class PlaneShooter : MonoBehaviour
 
     [HideInInspector] public bool Trigger;
 
-    public float Range = 400f;
-    public float FireInterval = 0.08f;
-    public float MuzzleOffsetZ = 4f;
-    public float Damage = 8f;
-    public LayerMask HitMask = ~0;
+    public PlaneWeaponStats Stats;
 
     PlaneHealth _ownHealth;
-
-    public float HeatPerShot = 6f;
-    public float MaxHeat = 100f;
-    public float CoolPerSecond = 35f;
-    public float OverheatedCoolPerSecond = 55f;
-    [Range(0f, 1f)] public float ResumeHeatFraction = 0.4f;
-
-    public float TracerDuration = 0.04f;
-    public Color TracerColor = new Color(1f, 0.85f, 0.3f, 1f);
-    public float TracerWidth = 0.12f;
 
     [HideInInspector] public bool UseAimDirection;
     [HideInInspector] public Vector3 AimDirection;
@@ -40,14 +26,20 @@ public class PlaneShooter : MonoBehaviour
     float _tracerHideTime;
 
     public float Heat => _heat;
-    public float HeatNormalized => _heat / MaxHeat;
+    public float HeatNormalized => Stats != null && Stats.MaxHeat > 0f ? _heat / Stats.MaxHeat : 0f;
     public bool Overheated => _overheated;
+    public float MuzzleOffsetZ => Stats != null ? Stats.MuzzleOffsetZ : 0f;
 
     void Awake()
     {
         _tracer = GetComponent<LineRenderer>();
         if (_tracer == null) _tracer = gameObject.AddComponent<LineRenderer>();
         _ownHealth = GetComponent<PlaneHealth>();
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneShooter)} on {name} has no Stats assigned.", this);
+            return;
+        }
         ConfigureTracer();
     }
 
@@ -58,21 +50,22 @@ public class PlaneShooter : MonoBehaviour
 
     void Update()
     {
+        if (Stats == null) return;
         var dt = Time.deltaTime;
 
         if (Trigger && !_overheated && Time.time >= _nextFireTime)
         {
             Fire();
-            _nextFireTime = Time.time + FireInterval;
+            _nextFireTime = Time.time + Stats.FireInterval;
         }
 
         if (!Trigger || _overheated)
         {
-            var cool = _overheated ? OverheatedCoolPerSecond : CoolPerSecond;
+            var cool = _overheated ? Stats.OverheatedCoolPerSecond : Stats.CoolPerSecond;
             _heat = Mathf.Max(0f, _heat - cool * dt);
         }
 
-        if (_overheated && _heat <= MaxHeat * ResumeHeatFraction)
+        if (_overheated && _heat <= Stats.MaxHeat * Stats.ResumeHeatFraction)
         {
             _overheated = false;
         }
@@ -85,19 +78,19 @@ public class PlaneShooter : MonoBehaviour
 
     void Fire()
     {
-        var origin = _transform.position + _transform.forward * MuzzleOffsetZ;
+        var origin = _transform.position + _transform.forward * Stats.MuzzleOffsetZ;
         var direction = UseAimDirection ? AimDirection.normalized : _transform.forward;
 
         Vector3 endPoint;
-        if (Physics.Raycast(origin, direction, out var hit, Range, HitMask, QueryTriggerInteraction.Ignore))
+        if (Physics.Raycast(origin, direction, out var hit, Stats.Range, Stats.HitMask, QueryTriggerInteraction.Ignore))
         {
             endPoint = hit.point;
             var victim = hit.collider.GetComponentInParent<PlaneHealth>();
-            if (victim != null && victim != _ownHealth)
+            if (victim != null && victim != _ownHealth && IsHostile(victim))
             {
                 var wasDead = victim.IsDead;
-                victim.TakeDamage(Damage);
-                Hit?.Invoke(Damage);
+                victim.TakeDamage(Stats.Damage);
+                Hit?.Invoke(Stats.Damage);
                 if (!wasDead && victim.IsDead)
                 {
                     Kills++;
@@ -107,17 +100,23 @@ public class PlaneShooter : MonoBehaviour
         }
         else
         {
-            endPoint = origin + direction * Range;
+            endPoint = origin + direction * Stats.Range;
         }
 
         ShowTracer(origin, endPoint);
 
-        _heat += HeatPerShot;
-        if (_heat >= MaxHeat)
+        _heat += Stats.HeatPerShot;
+        if (_heat >= Stats.MaxHeat)
         {
-            _heat = MaxHeat;
+            _heat = Stats.MaxHeat;
             _overheated = true;
         }
+    }
+
+    bool IsHostile(PlaneHealth victim)
+    {
+        if (_ownHealth == null) return true;
+        return _ownHealth.IsHostileTo(victim);
     }
 
     void ShowTracer(Vector3 from, Vector3 to)
@@ -125,21 +124,21 @@ public class PlaneShooter : MonoBehaviour
         _tracer.enabled = true;
         _tracer.SetPosition(0, from);
         _tracer.SetPosition(1, to);
-        _tracerHideTime = Time.time + TracerDuration;
+        _tracerHideTime = Time.time + Stats.TracerDuration;
     }
 
     void ConfigureTracer()
     {
         _tracer.positionCount = 2;
         _tracer.useWorldSpace = true;
-        _tracer.startWidth = TracerWidth;
-        _tracer.endWidth = TracerWidth;
+        _tracer.startWidth = Stats.TracerWidth;
+        _tracer.endWidth = Stats.TracerWidth;
         _tracer.enabled = false;
         if (_tracer.sharedMaterial == null)
         {
             _tracer.material = new Material(Shader.Find("Sprites/Default"));
         }
-        _tracer.startColor = TracerColor;
-        _tracer.endColor = new Color(TracerColor.r, TracerColor.g, TracerColor.b, 0f);
+        _tracer.startColor = Stats.TracerColor;
+        _tracer.endColor = new Color(Stats.TracerColor.r, Stats.TracerColor.g, Stats.TracerColor.b, 0f);
     }
 }

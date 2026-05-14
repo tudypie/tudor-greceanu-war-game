@@ -10,25 +10,9 @@ public class PlaneCrash : MonoBehaviour
     Quaternion _diveRotation;
     float _rollAngle;
 
+    public PlaneCrashStats Stats;
     public Behaviour[] DisableOnCrash;
     public ParticleSystem Smoke;
-
-    [Header("Dive")]
-    public float DiveAlignTime = 0.4f;
-    public float RollSpeed = 360f;
-
-    [Header("Drag")]
-    public float LinearDamping = 0.2f;
-    public float AngularDamping = 5f;
-
-    [Header("Cleanup")]
-    public float DestroyDelay = 8f;
-    public bool DestroyOnGroundImpact = true;
-    public LayerMask GroundMask = ~0;
-
-    [Header("Collision")]
-    public bool ExplodeOnCollision;
-    public GameObject ExplosionPrefab;
 
     void Awake()
     {
@@ -36,6 +20,10 @@ public class PlaneCrash : MonoBehaviour
         _rigidbody = GetComponent<Rigidbody>();
         _health.DestroyOnDeath = false;
         _health.Died += Crash;
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneCrash)} on {name} has no Stats assigned.", this);
+        }
     }
 
     void OnDestroy()
@@ -47,6 +35,7 @@ public class PlaneCrash : MonoBehaviour
     {
         if (_crashed) return;
         _crashed = true;
+        if (Stats == null) return;
 
         if (DisableOnCrash != null)
         {
@@ -57,8 +46,8 @@ public class PlaneCrash : MonoBehaviour
         }
 
         _rigidbody.useGravity = true;
-        _rigidbody.linearDamping = LinearDamping;
-        _rigidbody.angularDamping = AngularDamping;
+        _rigidbody.linearDamping = Stats.LinearDamping;
+        _rigidbody.angularDamping = Stats.AngularDamping;
         _rigidbody.angularVelocity = Vector3.zero;
 
         var flatForward = new Vector3(transform.forward.x, 0f, transform.forward.z);
@@ -71,16 +60,16 @@ public class PlaneCrash : MonoBehaviour
             Smoke.Play();
         }
 
-        Destroy(gameObject, DestroyDelay);
+        Destroy(gameObject, Stats.DestroyDelay);
     }
 
     void FixedUpdate()
     {
-        if (!_crashed) return;
-        var alpha = DiveAlignTime > 0f
-            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / DiveAlignTime)
+        if (!_crashed || Stats == null) return;
+        var alpha = Stats.DiveAlignTime > 0f
+            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / Stats.DiveAlignTime)
             : 1f;
-        _rollAngle += RollSpeed * Time.fixedDeltaTime;
+        _rollAngle += Stats.RollSpeed * Time.fixedDeltaTime;
         var target = _diveRotation * Quaternion.AngleAxis(_rollAngle, Vector3.forward);
         _rigidbody.MoveRotation(Quaternion.Slerp(_rigidbody.rotation, target, alpha));
         _rigidbody.angularVelocity = Vector3.zero;
@@ -88,22 +77,24 @@ public class PlaneCrash : MonoBehaviour
 
     void OnCollisionEnter(Collision collision)
     {
+        if (Stats == null) return;
         if (!_crashed)
         {
-            if (ExplodeOnCollision) Explode();
+            if (Stats.ExplodeOnCollision) Explode();
             return;
         }
-        if (!DestroyOnGroundImpact) return;
-        if ((GroundMask.value & (1 << collision.gameObject.layer)) == 0) return;
+        if (!Stats.DestroyOnGroundImpact) return;
+        if ((Stats.GroundMask.value & (1 << collision.gameObject.layer)) == 0) return;
         Explode();
     }
 
     void Explode()
     {
-        if (ExplosionPrefab != null)
+        if (Stats != null && Stats.ExplosionPrefab != null)
         {
-            Instantiate(ExplosionPrefab, transform.position, transform.rotation);
+            Instantiate(Stats.ExplosionPrefab, transform.position, transform.rotation);
         }
+        Debug.Log($"{gameObject.name} exploded");
         Destroy(gameObject);
     }
 }

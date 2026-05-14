@@ -36,32 +36,40 @@ public class PlaneControllerDebugMenu : MonoBehaviour
         if (Target != null) _initial = Capture(Target, CameraFollow);
     }
 
-    static Snapshot Capture(PlaneFlightModel t, PlaneCameraFollow cam) => new Snapshot
+    static Snapshot Capture(PlaneFlightModel t, PlaneCameraFollow cam)
     {
-        NormalThrust = t.NormalThrust,
-        MaxThrust = t.MaxThrust,
-        ThrustAgilityMultiplier = t.ThrustAgilityMultiplier,
-        PitchIncreaseSpeed = t.PitchIncreaseSpeed,
-        InvertPitch = t.InvertPitch,
-        RollIncreaseSpeed = t.RollIncreaseSpeed,
-        RollAutoLevelSpeed = t.RollAutoLevelSpeed,
-        YawSpeed = t.YawSpeed,
-        BankTurnSpeed = t.BankTurnSpeed,
-        CameraSpring = cam != null ? cam.CameraSpring : 0f,
-    };
+        var s = new Snapshot();
+        if (t != null && t.Stats != null)
+        {
+            s.NormalThrust = t.Stats.NormalThrust;
+            s.MaxThrust = t.Stats.MaxThrust;
+            s.ThrustAgilityMultiplier = t.Stats.ThrustAgilityMultiplier;
+            s.PitchIncreaseSpeed = t.Stats.PitchIncreaseSpeed;
+            s.InvertPitch = t.Stats.InvertPitch;
+            s.RollIncreaseSpeed = t.Stats.RollIncreaseSpeed;
+            s.RollAutoLevelSpeed = t.Stats.RollAutoLevelSpeed;
+            s.YawSpeed = t.Stats.YawSpeed;
+            s.BankTurnSpeed = t.Stats.BankTurnSpeed;
+        }
+        if (cam != null && cam.Stats != null) s.CameraSpring = cam.Stats.CameraSpring;
+        return s;
+    }
 
     static void Apply(PlaneFlightModel t, PlaneCameraFollow cam, Snapshot s)
     {
-        t.NormalThrust = s.NormalThrust;
-        t.MaxThrust = s.MaxThrust;
-        t.ThrustAgilityMultiplier = s.ThrustAgilityMultiplier;
-        t.PitchIncreaseSpeed = s.PitchIncreaseSpeed;
-        t.InvertPitch = s.InvertPitch;
-        t.RollIncreaseSpeed = s.RollIncreaseSpeed;
-        t.RollAutoLevelSpeed = s.RollAutoLevelSpeed;
-        t.YawSpeed = s.YawSpeed;
-        t.BankTurnSpeed = s.BankTurnSpeed;
-        if (cam != null) cam.CameraSpring = s.CameraSpring;
+        if (t != null && t.Stats != null)
+        {
+            t.Stats.NormalThrust = s.NormalThrust;
+            t.Stats.MaxThrust = s.MaxThrust;
+            t.Stats.ThrustAgilityMultiplier = s.ThrustAgilityMultiplier;
+            t.Stats.PitchIncreaseSpeed = s.PitchIncreaseSpeed;
+            t.Stats.InvertPitch = s.InvertPitch;
+            t.Stats.RollIncreaseSpeed = s.RollIncreaseSpeed;
+            t.Stats.RollAutoLevelSpeed = s.RollAutoLevelSpeed;
+            t.Stats.YawSpeed = s.YawSpeed;
+            t.Stats.BankTurnSpeed = s.BankTurnSpeed;
+        }
+        if (cam != null && cam.Stats != null) cam.Stats.CameraSpring = s.CameraSpring;
     }
 
     static string Format(Snapshot s) =>
@@ -87,33 +95,34 @@ public class PlaneControllerDebugMenu : MonoBehaviour
 
     void OnGUI()
     {
-        if (!_visible || Target == null) return;
+        if (!_visible || Target == null || Target.Stats == null) return;
 
         _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, "Plane Settings (press " + ToggleKey + " to toggle)");
     }
 
     void DrawWindow(int id)
     {
-        Target.NormalThrust = Slider("Normal Thrust", Target.NormalThrust, _initial.NormalThrust, 100f, 2000f);
-        Target.MaxThrust = Slider("Max Thrust (Space)", Target.MaxThrust, _initial.MaxThrust, 100f, 3000f);
-        Target.ThrustAgilityMultiplier = Slider("Thrust Agility Mult.", Target.ThrustAgilityMultiplier, _initial.ThrustAgilityMultiplier, 1f, 4f);
+        var fs = Target.Stats;
+        fs.NormalThrust = Slider("Normal Thrust", fs.NormalThrust, _initial.NormalThrust, 100f, 2000f);
+        fs.MaxThrust = Slider("Max Thrust (Space)", fs.MaxThrust, _initial.MaxThrust, 100f, 3000f);
+        fs.ThrustAgilityMultiplier = Slider("Thrust Agility Mult.", fs.ThrustAgilityMultiplier, _initial.ThrustAgilityMultiplier, 1f, 4f);
 
         GUILayout.Space(6);
 
-        Target.PitchIncreaseSpeed = Slider("Pitch Speed", Target.PitchIncreaseSpeed, _initial.PitchIncreaseSpeed, 50f, 800f);
-        Target.InvertPitch = Toggle("Invert Pitch (W = climb)", Target.InvertPitch, _initial.InvertPitch);
+        fs.PitchIncreaseSpeed = Slider("Pitch Speed", fs.PitchIncreaseSpeed, _initial.PitchIncreaseSpeed, 50f, 800f);
+        fs.InvertPitch = Toggle("Invert Pitch (W = climb)", fs.InvertPitch, _initial.InvertPitch);
 
         GUILayout.Space(6);
 
-        Target.RollIncreaseSpeed = Slider("Roll Speed (A/D)", Target.RollIncreaseSpeed, _initial.RollIncreaseSpeed, 50f, 1500f);
-        Target.RollAutoLevelSpeed = Slider("Roll Auto-Level Speed", Target.RollAutoLevelSpeed, _initial.RollAutoLevelSpeed, 0f, 360f);
-        Target.YawSpeed = Slider("Yaw Speed (Q/E)", Target.YawSpeed, _initial.YawSpeed, 0f, 180f);
-        Target.BankTurnSpeed = Slider("Bank Turn Speed", Target.BankTurnSpeed, _initial.BankTurnSpeed, 0f, 180f);
+        fs.RollIncreaseSpeed = Slider("Roll Speed (A/D)", fs.RollIncreaseSpeed, _initial.RollIncreaseSpeed, 50f, 1500f);
+        fs.RollAutoLevelSpeed = Slider("Roll Auto-Level Speed", fs.RollAutoLevelSpeed, _initial.RollAutoLevelSpeed, 0f, 360f);
+        fs.YawSpeed = Slider("Yaw Speed (Q/E)", fs.YawSpeed, _initial.YawSpeed, 0f, 180f);
+        fs.BankTurnSpeed = Slider("Bank Turn Speed", fs.BankTurnSpeed, _initial.BankTurnSpeed, 0f, 180f);
 
-        if (CameraFollow != null)
+        if (CameraFollow != null && CameraFollow.Stats != null)
         {
             GUILayout.Space(6);
-            CameraFollow.CameraSpring = Slider("Camera Spring", CameraFollow.CameraSpring, _initial.CameraSpring, 0f, 1f);
+            CameraFollow.Stats.CameraSpring = Slider("Camera Spring", CameraFollow.Stats.CameraSpring, _initial.CameraSpring, 0f, 1f);
         }
 
         GUILayout.Space(10);

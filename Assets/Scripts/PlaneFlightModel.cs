@@ -5,22 +5,7 @@ public class PlaneFlightModel : MonoBehaviour
     Transform _transform;
     Rigidbody _rigidbody;
 
-    public float NormalThrust = 600f;
-    public float MaxThrust = 1200f;
-    public float ThrustAgilityMultiplier = 1.8f;
-
-    public float PitchIncreaseSpeed = 300f;
-    public bool InvertPitch = true;
-
-    public float RollIncreaseSpeed = 420f;
-    public float RollAutoLevelSpeed = 120f;
-
-    public float YawSpeed = 30f;
-    public float BankTurnSpeed = 15f;
-
-    public float RollResponseTime = 0.3f;
-    public float PitchResponseTime = 0.3f;
-    public float YawResponseTime = 0.3f;
+    public PlaneFlightStats Stats;
 
     [HideInInspector] public float PitchInput;
     [HideInInspector] public float RollInput;
@@ -33,29 +18,35 @@ public class PlaneFlightModel : MonoBehaviour
 
     public Transform CachedTransform => _transform;
     public Rigidbody Body => _rigidbody;
+    public bool InvertPitch => Stats != null && Stats.InvertPitch;
 
     void Start()
     {
         _transform = transform;
         _rigidbody = GetComponent<Rigidbody>();
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneFlightModel)} on {name} has no Stats assigned.", this);
+        }
     }
 
     void FixedUpdate()
     {
-        var agility = Boost ? ThrustAgilityMultiplier : 1f;
+        if (Stats == null) return;
+        var agility = Boost ? Stats.ThrustAgilityMultiplier : 1f;
         var dt = Time.fixedDeltaTime;
 
         var bank = _transform.right.y;
 
-        var targetPitchRate = (InvertPitch ? -PitchInput : PitchInput) * PitchIncreaseSpeed * agility;
+        var targetPitchRate = (Stats.InvertPitch ? -PitchInput : PitchInput) * Stats.PitchIncreaseSpeed * agility;
         var targetRollRate = Mathf.Approximately(RollInput, 0f)
-            ? -bank * RollAutoLevelSpeed * agility
-            : -RollInput * RollIncreaseSpeed * agility;
-        var targetYawRate = (YawInput * YawSpeed - bank * BankTurnSpeed) * agility;
+            ? -bank * Stats.RollAutoLevelSpeed * agility
+            : -RollInput * Stats.RollIncreaseSpeed * agility;
+        var targetYawRate = (YawInput * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
 
-        var alphaPitch = 1f - Mathf.Exp(-dt / Mathf.Max(PitchResponseTime, 0.0001f));
-        var alphaRoll = 1f - Mathf.Exp(-dt / Mathf.Max(RollResponseTime, 0.0001f));
-        var alphaYaw = 1f - Mathf.Exp(-dt / Mathf.Max(YawResponseTime, 0.0001f));
+        var alphaPitch = 1f - Mathf.Exp(-dt / Mathf.Max(Stats.PitchResponseTime, 0.0001f));
+        var alphaRoll = 1f - Mathf.Exp(-dt / Mathf.Max(Stats.RollResponseTime, 0.0001f));
+        var alphaYaw = 1f - Mathf.Exp(-dt / Mathf.Max(Stats.YawResponseTime, 0.0001f));
 
         _pitchRate = Mathf.Lerp(_pitchRate, targetPitchRate, alphaPitch);
         _rollRate = Mathf.Lerp(_rollRate, targetRollRate, alphaRoll);
@@ -72,7 +63,7 @@ public class PlaneFlightModel : MonoBehaviour
 
         _transform.Rotate(Vector3.up, deltaYaw, Space.World);
 
-        var thrust = Boost ? MaxThrust : NormalThrust;
+        var thrust = Boost ? Stats.MaxThrust : Stats.NormalThrust;
         _rigidbody.linearVelocity = _transform.forward * (thrust * Time.fixedDeltaTime);
     }
 }

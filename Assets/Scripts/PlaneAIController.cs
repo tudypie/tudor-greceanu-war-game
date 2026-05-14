@@ -2,46 +2,17 @@ using UnityEngine;
 
 [DefaultExecutionOrder(-100)]
 [RequireComponent(typeof(PlaneFlightModel))]
+[RequireComponent(typeof(PlaneHealth))]
 public class PlaneAIController : MonoBehaviour
 {
-    enum AIState { Patrolling, Chasing }
+    enum AIState { Patrolling, Chasing, Extending }
 
     PlaneFlightModel _model;
     PlaneShooter _shooter;
+    PlaneHealth _health;
     Transform _transform;
 
-    public Transform Target;
-    public bool AutoFindPlayer = true;
-
-    [Header("Steering")]
-    public float PitchGain = 2.5f;
-    public float YawGain = 1.5f;
-    public float RollGain = 3.5f;
-
-    [Header("Commit Window")]
-    public float CommitMin = 0.8f;
-    public float CommitMax = 1.5f;
-
-    [Header("Patrol")]
-    public float PatrolRadius = 350f;
-    public float PatrolVerticalRange = 60f;
-    public float PatrolMinWorldY = 30f;
-    public float PatrolWaypointReachDistance = 70f;
-    public float PatrolWaypointTimeout = 12f;
-
-    [Header("Firing")]
-    public float FireConeDeg = 8f;
-    public float FireRange = 350f;
-    public float FireMinDistance = 12f;
-
-    [Header("Burst Fire")]
-    public float BurstMin = 0.4f;
-    public float BurstMax = 0.8f;
-    public float CooldownMin = 0.6f;
-    public float CooldownMax = 1.2f;
-
-    [Header("Feel")]
-    public float ReactionTime = 0.15f;
+    public PlaneAIStats Stats;
 
     float _smoothPitch, _smoothRoll, _smoothYaw;
     Vector3 _committedAimPoint;
@@ -54,36 +25,58 @@ public class PlaneAIController : MonoBehaviour
     float _patrolWaypointDeadline;
     AIState _state = AIState.Patrolling;
 
+    PlaneHealth _target;
+    float _nextTargetRefresh;
+
+    Vector3 _extendAimPoint;
+    float _extendUntil;
+    float _nextExtendAllowed;
+
+    const int LagBufferSize = 32;
+    readonly Vector3[] _lagPositions = new Vector3[LagBufferSize];
+    readonly float[] _lagTimes = new float[LagBufferSize];
+    int _lagHead;
+    int _lagCount;
+    PlaneHealth _lagSampledTarget;
+
     void Start()
     {
         _transform = transform;
         _model = GetComponent<PlaneFlightModel>();
         _shooter = GetComponent<PlaneShooter>();
-        if (Target == null && AutoFindPlayer)
-        {
-            var player = FindFirstObjectByType<PlanePlayerInput>();
-            if (player != null) Target = player.transform;
-        }
+        _health = GetComponent<PlaneHealth>();
         _anchor = _transform.position;
+        if (Stats == null)
+        {
+            Debug.LogError($"{nameof(PlaneAIController)} on {name} has no Stats assigned.", this);
+            return;
+        }
         PickNewPatrolWaypoint();
         _committedAimPoint = _patrolWaypoint;
+        RefreshTarget(force: true);
     }
 
     void FixedUpdate()
     {
-        if (_model == null) return;
+        if (_model == null || Stats == null) return;
 
+        if (Time.fixedTime >= _nextTargetRefresh)
+        {
+            RefreshTarget(force: false);
+            _nextTargetRefresh = Time.fixedTime + Stats.TargetRefreshInterval;
+        }
+
+        SampleTargetForLag();
         UpdateState();
 
         if (Time.fixedTime >= _commitUntil)
         {
-            _committedAimPoint = _state == AIState.Chasing && Target != null
-                ? Target.position
-                : _patrolWaypoint;
-            _commitUntil = Time.fixedTime + Random.Range(CommitMin, CommitMax);
+            _committedAimPoint = ResolveAimPoint();
+            _commitUntil = Time.fixedTime + Random.Range(Stats.CommitMin, Stats.CommitMax);
         }
 
-        var toAim = _committedAimPoint - _transform.position;
+        var aimPoint = _committedAimPoint + ComputeAvoidance() + ComputeTerrainAvoidance();
+        var toAim = aimPoint - _transform.position;
         var aimDistance = toAim.magnitude;
         if (aimDistance < 0.0001f) return;
 
@@ -91,12 +84,12 @@ public class PlaneAIController : MonoBehaviour
         var dirLocal = _transform.InverseTransformDirection(dirWorld);
 
         var pitchSign = _model.InvertPitch ? +1f : -1f;
-        var targetPitch = Mathf.Clamp(dirLocal.y * PitchGain * pitchSign, -1f, 1f);
-        var targetRoll = Mathf.Clamp(dirLocal.x * RollGain, -1f, 1f);
-        var targetYaw = Mathf.Clamp(dirLocal.x * YawGain, -1f, 1f);
+        var targetPitch = Mathf.Clamp(dirLocal.y * Stats.PitchGain * pitchSign, -1f, 1f);
+        var targetRoll = Mathf.Clamp(dirLocal.x * Stats.RollGain, -1f, 1f);
+        var targetYaw = Mathf.Clamp(dirLocal.x * Stats.YawGain, -1f, 1f);
 
-        var alpha = ReactionTime > 0f
-            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / ReactionTime)
+        var alpha = Stats.ReactionTime > 0f
+            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / Stats.ReactionTime)
             : 1f;
         _smoothPitch = Mathf.Lerp(_smoothPitch, targetPitch, alpha);
         _smoothRoll = Mathf.Lerp(_smoothRoll, targetRoll, alpha);
@@ -108,76 +101,276 @@ public class PlaneAIController : MonoBehaviour
 
         _model.Boost = false;
 
-        if (_shooter != null)
+        UpdateFiring(dirLocal);
+    }
+
+    Vector3 ComputeTerrainAvoidance()
+    {
+        if (Stats.TerrainLookAhead <= 0f || Stats.TerrainStrength <= 0f) return Vector3.zero;
+
+        var origin = _transform.position;
+        var dir = _transform.forward;
+        var mask = ~(1 << gameObject.layer);
+
+        if (!Physics.SphereCast(origin, Stats.TerrainSafetyRadius, dir, out var hit,
+            Stats.TerrainLookAhead, mask, QueryTriggerInteraction.Ignore))
+            return Vector3.zero;
+
+        var perpNormal = hit.normal - dir * Vector3.Dot(hit.normal, dir);
+        Vector3 avoidDir;
+        if (perpNormal.sqrMagnitude < 0.01f) avoidDir = _transform.up;
+        else avoidDir = perpNormal.normalized;
+
+        var t = 1f - hit.distance / Stats.TerrainLookAhead;
+        var weight = t * t;
+        return avoidDir * Stats.TerrainStrength * weight;
+    }
+
+    Vector3 ComputeAvoidance()
+    {
+        if (Stats.AvoidanceRadius <= 0f || Stats.AvoidanceStrength <= 0f) return Vector3.zero;
+
+        var bias = Vector3.zero;
+        var all = Object.FindObjectsByType<PlaneFlightModel>(FindObjectsSortMode.None);
+        var myPos = _transform.position;
+        var myFwd = _transform.forward;
+        var radSq = Stats.AvoidanceRadius * Stats.AvoidanceRadius;
+        var targetGo = _target != null ? _target.gameObject : null;
+
+        foreach (var p in all)
         {
-            var wantsFire = false;
-            if (_state == AIState.Chasing && Target != null)
-            {
-                var liveDistance = Vector3.Distance(Target.position, _transform.position);
-                var coneCos = Mathf.Cos(FireConeDeg * Mathf.Deg2Rad);
-                var aligned = dirLocal.z > coneCos;
-                var inRange = liveDistance < FireRange && liveDistance > FireMinDistance;
-                wantsFire = aligned && inRange;
-            }
-            _shooter.Trigger = ResolveBurstTrigger(wantsFire);
+            if (p == null || p == _model) continue;
+            if (targetGo != null && p.gameObject == targetGo) continue;
+
+            var d = p.transform.position - myPos;
+            var distSq = d.sqrMagnitude;
+            if (distSq > radSq || distSq < 0.0001f) continue;
+
+            var dist = Mathf.Sqrt(distSq);
+            var dir = d / dist;
+            if (Vector3.Dot(myFwd, dir) < Stats.AvoidanceAheadDot) continue;
+
+            var perp = dir - myFwd * Vector3.Dot(dir, myFwd);
+            Vector3 avoidDir;
+            if (perp.sqrMagnitude < 0.01f) avoidDir = _transform.up;
+            else avoidDir = -perp.normalized;
+
+            var weight = 1f - dist / Stats.AvoidanceRadius;
+            bias += avoidDir * Stats.AvoidanceStrength * weight;
+        }
+        return bias;
+    }
+
+    Vector3 ResolveAimPoint()
+    {
+        switch (_state)
+        {
+            case AIState.Chasing:
+                return _target != null ? GetLaggedTargetPos() : _patrolWaypoint;
+            case AIState.Extending:
+                return _extendAimPoint;
+            default:
+                return _patrolWaypoint;
         }
     }
 
     void UpdateState()
     {
-        if (_state == AIState.Chasing) return;
-
-        if (Target != null)
+        switch (_state)
         {
-            var distSq = (Target.position - _anchor).sqrMagnitude;
-            if (distSq <= PatrolRadius * PatrolRadius)
+            case AIState.Patrolling:
+                if (_target != null && IsTargetEngageable(_target))
+                {
+                    EnterChasing();
+                    return;
+                }
+                var reachSq = Stats.PatrolWaypointReachDistance * Stats.PatrolWaypointReachDistance;
+                if ((_patrolWaypoint - _transform.position).sqrMagnitude <= reachSq ||
+                    Time.fixedTime >= _patrolWaypointDeadline)
+                {
+                    PickNewPatrolWaypoint();
+                    _commitUntil = 0f;
+                }
+                break;
+
+            case AIState.Chasing:
+                if (_target == null || !IsTargetEngageable(_target))
+                {
+                    _state = AIState.Patrolling;
+                    PickNewPatrolWaypoint();
+                    _commitUntil = 0f;
+                    return;
+                }
+                if (Time.fixedTime >= _nextExtendAllowed)
+                {
+                    var toTarget = _target.transform.position - _transform.position;
+                    var distSq = toTarget.sqrMagnitude;
+                    if (distSq > 0.0001f)
+                    {
+                        var aspectDot = Vector3.Dot(_transform.forward, toTarget.normalized);
+                        if (aspectDot < Stats.BadAspectDot)
+                        {
+                            EnterExtending();
+                            return;
+                        }
+                    }
+                }
+                break;
+
+            case AIState.Extending:
+                if (Time.fixedTime >= _extendUntil)
+                {
+                    if (_target != null && IsTargetEngageable(_target)) EnterChasing();
+                    else
+                    {
+                        _state = AIState.Patrolling;
+                        PickNewPatrolWaypoint();
+                    }
+                    _commitUntil = 0f;
+                }
+                break;
+        }
+    }
+
+    void EnterChasing()
+    {
+        _state = AIState.Chasing;
+        _commitUntil = 0f;
+        _nextExtendAllowed = Time.fixedTime + Stats.RepositionDuration;
+    }
+
+    void EnterExtending()
+    {
+        _state = AIState.Extending;
+        _extendAimPoint = _transform.position + _transform.forward * Stats.ExtendDistance;
+        if (_extendAimPoint.y < Stats.PatrolMinWorldY) _extendAimPoint.y = Stats.PatrolMinWorldY;
+        _extendUntil = Time.fixedTime + Random.Range(Stats.ExtendMin, Stats.ExtendMax);
+        _commitUntil = 0f;
+    }
+
+    void UpdateFiring(Vector3 dirLocal)
+    {
+        if (_shooter == null) return;
+
+        var wantsFire = false;
+        if (_state == AIState.Chasing && _target != null)
+        {
+            var liveDistance = Vector3.Distance(_target.transform.position, _transform.position);
+            var coneCos = Mathf.Cos(Stats.FireConeDeg * Mathf.Deg2Rad);
+            var aligned = dirLocal.z > coneCos;
+            var inRange = liveDistance < Stats.FireRange && liveDistance > Stats.FireMinDistance;
+            wantsFire = aligned && inRange;
+        }
+
+        _shooter.Trigger = ResolveBurstTrigger(wantsFire);
+    }
+
+    bool IsTargetEngageable(PlaneHealth t)
+    {
+        if (t == null || t.IsDead) return false;
+        var d = t.transform.position - _anchor;
+        return d.sqrMagnitude <= Stats.EngagementRadius * Stats.EngagementRadius;
+    }
+
+    void RefreshTarget(bool force)
+    {
+        var all = Object.FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
+        var myPos = transform.position;
+        var engageSq = Stats.EngagementRadius * Stats.EngagementRadius;
+
+        PlaneHealth best = null;
+        var bestDistSq = float.MaxValue;
+        foreach (var ph in all)
+        {
+            if (ph == null || ph == _health) continue;
+            if (ph.IsDead) continue;
+            if (!_health.IsHostileTo(ph)) continue;
+            var dSq = (ph.transform.position - _anchor).sqrMagnitude;
+            if (dSq > engageSq) continue;
+            var myDistSq = (ph.transform.position - myPos).sqrMagnitude;
+            if (myDistSq < bestDistSq)
             {
-                _state = AIState.Chasing;
-                _commitUntil = 0f;
-                return;
+                bestDistSq = myDistSq;
+                best = ph;
             }
         }
 
-        var reachSq = PatrolWaypointReachDistance * PatrolWaypointReachDistance;
-        if ((_patrolWaypoint - _transform.position).sqrMagnitude <= reachSq ||
-            Time.fixedTime >= _patrolWaypointDeadline)
+        if (best == null)
         {
-            PickNewPatrolWaypoint();
-            _commitUntil = 0f;
+            _target = null;
+            ResetLagBuffer(null);
+            return;
         }
+
+        if (force || _target == null || _target.IsDead)
+        {
+            SetTarget(best);
+            return;
+        }
+
+        var currentDistSq = (_target.transform.position - myPos).sqrMagnitude;
+        if (bestDistSq < currentDistSq * Stats.TargetSwitchHysteresis * Stats.TargetSwitchHysteresis)
+        {
+            SetTarget(best);
+        }
+    }
+
+    void SetTarget(PlaneHealth t)
+    {
+        if (_target == t) return;
+        _target = t;
+        ResetLagBuffer(t);
+    }
+
+    void ResetLagBuffer(PlaneHealth t)
+    {
+        _lagSampledTarget = t;
+        _lagHead = 0;
+        _lagCount = 0;
+    }
+
+    void SampleTargetForLag()
+    {
+        if (_target == null) return;
+        if (_target != _lagSampledTarget) ResetLagBuffer(_target);
+
+        _lagPositions[_lagHead] = _target.transform.position;
+        _lagTimes[_lagHead] = Time.fixedTime;
+        _lagHead = (_lagHead + 1) % LagBufferSize;
+        if (_lagCount < LagBufferSize) _lagCount++;
+    }
+
+    Vector3 GetLaggedTargetPos()
+    {
+        if (_target == null) return _patrolWaypoint;
+        if (_lagCount == 0 || Stats.LagSeconds <= 0f) return _target.transform.position;
+
+        var targetTime = Time.fixedTime - Stats.LagSeconds;
+        for (int i = 1; i <= _lagCount; i++)
+        {
+            var idx = (_lagHead - i + LagBufferSize) % LagBufferSize;
+            if (_lagTimes[idx] <= targetTime) return _lagPositions[idx];
+        }
+        var oldestIdx = (_lagHead - _lagCount + LagBufferSize) % LagBufferSize;
+        return _lagPositions[oldestIdx];
     }
 
     void PickNewPatrolWaypoint()
     {
-        var horiz = Random.insideUnitCircle * PatrolRadius;
-        var dy = Random.Range(-PatrolVerticalRange, PatrolVerticalRange);
+        var horiz = Random.insideUnitCircle * Stats.PatrolRadius;
+        var dy = Random.Range(-Stats.PatrolVerticalRange, Stats.PatrolVerticalRange);
         _patrolWaypoint = _anchor + new Vector3(horiz.x, dy, horiz.y);
-        if (_patrolWaypoint.y < PatrolMinWorldY) _patrolWaypoint.y = PatrolMinWorldY;
-        _patrolWaypointDeadline = Time.fixedTime + PatrolWaypointTimeout;
+        if (_patrolWaypoint.y < Stats.PatrolMinWorldY) _patrolWaypoint.y = Stats.PatrolMinWorldY;
+        _patrolWaypointDeadline = Time.fixedTime + Stats.PatrolWaypointTimeout;
     }
 
     void OnDrawGizmos()
     {
-        var chasing = Application.isPlaying && _state == AIState.Chasing;
-        Gizmos.color = chasing ? Color.red : Color.green;
-
-        var anchor = Application.isPlaying ? _anchor : transform.position;
-        DrawHorizontalCircle(anchor, PatrolRadius, 48);
+        var isChasing = Application.isPlaying && _state == AIState.Chasing;
+        var isExtending = Application.isPlaying && _state == AIState.Extending;
+        Gizmos.color = isExtending ? Color.yellow : (isChasing ? Color.red : Color.green);
 
         DrawArrow(transform.position, transform.forward, 50f);
-    }
-
-    static void DrawHorizontalCircle(Vector3 center, float radius, int segments)
-    {
-        var step = Mathf.PI * 2f / segments;
-        var prev = center + new Vector3(radius, 0f, 0f);
-        for (int i = 1; i <= segments; i++)
-        {
-            var t = i * step;
-            var next = center + new Vector3(Mathf.Cos(t) * radius, 0f, Mathf.Sin(t) * radius);
-            Gizmos.DrawLine(prev, next);
-            prev = next;
-        }
     }
 
     static void DrawArrow(Vector3 origin, Vector3 dir, float length)
@@ -204,13 +397,13 @@ public class PlaneAIController : MonoBehaviour
 
         if (_burstUntil > 0f && now >= _burstUntil && _cooldownUntil < _burstUntil)
         {
-            _cooldownUntil = now + Random.Range(CooldownMin, CooldownMax);
+            _cooldownUntil = now + Random.Range(Stats.CooldownMin, Stats.CooldownMax);
             return false;
         }
 
         if (wantsFire)
         {
-            _burstUntil = now + Random.Range(BurstMin, BurstMax);
+            _burstUntil = now + Random.Range(Stats.BurstMin, Stats.BurstMax);
             return true;
         }
 
