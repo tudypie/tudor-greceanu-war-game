@@ -12,9 +12,13 @@ public class PlaneCrashStats : ScriptableObject
     public float AngularDamping = 5f;
 
     [Header("Cleanup")]
-    public float DestroyDelay = 8f;
     public bool DestroyOnGroundImpact = true;
     public LayerMask GroundMask = ~0;
+    [Tooltip("Backstop independent of physics layers: a downed plane explodes " +
+             "once its pivot is within this many metres of the terrain surface " +
+             "(Terrain.SampleHeight), even if the collider tunnels/grazes and " +
+             "OnCollisionEnter never fires. <= 0 disables the backstop.")]
+    public float TerrainImpactHeight = 3f;
 
     [Header("Collision")]
     public bool ExplodeOnCollision;

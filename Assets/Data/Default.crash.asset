@@ -16,7 +16,6 @@ MonoBehaviour:
   RollSpeed: 360
   LinearDamping: 0.2
   AngularDamping: 0.1
-  DestroyDelay: 8
   DestroyOnGroundImpact: 1
   GroundMask:
     serializedVersion: 2

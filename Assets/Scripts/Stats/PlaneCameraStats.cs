@@ -12,13 +12,6 @@ public class PlaneCameraStats : ScriptableObject
     public float MinPitch = -60f;
     public float MaxPitch = 75f;
 
-    [Header("Smoothing")]
-    [Range(0f, 1f)] public float CameraSpring = 0.92f;
-    [Tooltip("How loosely the camera trails the plane's heading. Higher = smoother, eliminates the snap when looping/360ing through vertical.")]
-    [Range(0f, 1f)] public float HeadingFollowSpring = 0.9f;
-    [Tooltip("Rotation smoothing for where the camera looks. Higher = smoother aim.")]
-    [Range(0f, 1f)] public float LookSpring = 0.85f;
-
     [Header("Cursor")]
     public bool LockCursor = true;
 }

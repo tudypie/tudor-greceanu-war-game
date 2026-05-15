@@ -132,9 +132,17 @@ public class PlaneFlightModel : MonoBehaviour
             // ignoring pilot pitch input until recovered.
             targetPitchRate = Stats.StallNoseDownRate * agility;
         else if (_overCeiling)
+        {
             // Too high to sustain: the plane mushes over and the nose drops
-            // back toward thicker air, overriding pilot/AI pitch input.
-            targetPitchRate = Stats.CeilingNoseDownRate * agility;
+            // back toward thicker air, overriding pilot/AI pitch input — but
+            // only until it reaches CeilingMaxDiveAngle below horizontal, so
+            // it settles into a descent rather than tucking into a vertical
+            // dive. climbFactor == -sin(angle) at that nose-down attitude.
+            var diveLimit = -Mathf.Sin(Stats.CeilingMaxDiveAngle * Mathf.Deg2Rad);
+            targetPitchRate = climbFactor <= diveLimit
+                ? 0f
+                : Stats.CeilingNoseDownRate * agility;
+        }
         else
             targetPitchRate = (Stats.InvertPitch ? -PitchInput : PitchInput)
                 * Stats.PitchIncreaseSpeed * agility;

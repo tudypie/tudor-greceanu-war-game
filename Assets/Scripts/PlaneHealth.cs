@@ -19,6 +19,10 @@ public class PlaneHealth : MonoBehaviour
 
     public event Action Died;
     public event Action<float> Damaged;
+    // Same as Damaged, but carries the attacker's PlaneHealth (the owner of
+    // the PlaneShooter that landed the hit), or null if it was anonymous.
+    // The AI subscribes to this to retaliate against whoever shot it.
+    public event Action<float, PlaneHealth> DamagedBy;
 
     public float Health => _health;
     public float MaxHealth => Stats != null ? Stats.MaxHealth : 0f;
@@ -46,11 +50,14 @@ public class PlaneHealth : MonoBehaviour
         _health = Stats.MaxHealth;
     }
 
-    public void TakeDamage(float amount)
+    public void TakeDamage(float amount) => TakeDamage(amount, null);
+
+    public void TakeDamage(float amount, PlaneHealth attacker)
     {
         if (_dead || amount <= 0f) return;
         _health -= amount;
         Damaged?.Invoke(amount);
+        DamagedBy?.Invoke(amount, attacker);
         if (_health <= 0f)
         {
             _health = 0f;

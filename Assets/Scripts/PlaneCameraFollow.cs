@@ -11,14 +11,6 @@ public class PlaneCameraFollow : MonoBehaviour
 
     float _yawOffset;
     float _pitchOffset;
-    float _smoothHeadingDeg;
-    bool _snapped;
-
-    public float CameraSpring
-    {
-        get => Stats != null ? Stats.CameraSpring : 0f;
-        set { if (Stats != null) Stats.CameraSpring = value; }
-    }
 
     void Start()
     {
@@ -34,7 +26,9 @@ public class PlaneCameraFollow : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
-        _smoothHeadingDeg = HeadingFromForward(_transform.forward, 0f);
+        // Start parked behind the plane's initial heading; from here on the
+        // orbit is world-fixed and only the player moves it.
+        _yawOffset = HeadingFromForward(_transform.forward, 0f);
     }
 
     void LateUpdate()
@@ -43,36 +37,20 @@ public class PlaneCameraFollow : MonoBehaviour
 
         ReadMouseLook();
 
-        // Track heading angle-aware so the ~180° flip through vertical (loops/360s)
-        // and the ±180 wrap ease in over time instead of snapping the camera around.
-        var rawHeading = HeadingFromForward(_transform.forward, _smoothHeadingDeg);
-        var headingAlpha = SpringAlpha(Stats.HeadingFollowSpring);
-        _smoothHeadingDeg = Mathf.LerpAngle(_smoothHeadingDeg, rawHeading, headingAlpha);
-
-        var orbit = Quaternion.Euler(_pitchOffset, _smoothHeadingDeg + _yawOffset, 0f);
-        var targetPos = _transform.position + orbit * Stats.FollowOffset;
-
-        // First frame: jump straight to the target so there's no startup swing.
-        var posAlpha = _snapped ? SpringAlpha(Stats.CameraSpring) : 1f;
-        var lookAlpha = _snapped ? SpringAlpha(Stats.LookSpring) : 1f;
-        _snapped = true;
+        // The orbit is fixed in world space and driven purely by the player.
+        // The camera does NOT rotate with the plane's heading/pitch/roll; it
+        // only tracks the plane's position so the plane stays framed.
+        var orbit = Quaternion.Euler(_pitchOffset, _yawOffset, 0f);
 
         var cam = Camera.transform;
-        cam.position = Vector3.Lerp(cam.position, targetPos, posAlpha);
+        cam.position = _transform.position + orbit * Stats.FollowOffset;
 
         var lookTarget = CameraTarget != null ? CameraTarget : _transform;
         var toTarget = lookTarget.position - cam.position;
         if (toTarget.sqrMagnitude > 0.0001f)
         {
-            var lookRot = Quaternion.LookRotation(toTarget, Vector3.up);
-            cam.rotation = Quaternion.Slerp(cam.rotation, lookRot, lookAlpha);
+            cam.rotation = Quaternion.LookRotation(toTarget, Vector3.up);
         }
-    }
-
-    // Frame-rate independent smoothing: 'spring' is the fraction retained per 1/60 s.
-    static float SpringAlpha(float spring)
-    {
-        return 1f - Mathf.Pow(Mathf.Clamp01(spring), Time.deltaTime * 60f);
     }
 
     void ReadMouseLook()

@@ -4,7 +4,12 @@ using UnityEngine;
 public class PlaneShooter : MonoBehaviour
 {
     Transform _transform;
-    LineRenderer _tracer;
+
+    [Tooltip("Transforms the tracer LineRenderers spawn from (e.g. left/right wing guns). " +
+             "If empty, a single tracer is used at MuzzleOffsetZ along forward.")]
+    public Transform[] MuzzlePoints;
+
+    LineRenderer[] _tracers;
 
     public event Action<float> Hit;
     public event Action Killed;
@@ -40,15 +45,13 @@ public class PlaneShooter : MonoBehaviour
 
     void Awake()
     {
-        _tracer = GetComponent<LineRenderer>();
-        if (_tracer == null) _tracer = gameObject.AddComponent<LineRenderer>();
         _ownHealth = GetComponent<PlaneHealth>();
         if (Stats == null)
         {
             Debug.LogError($"{nameof(PlaneShooter)} on {name} has no Stats assigned.", this);
             return;
         }
-        ConfigureTracer();
+        BuildTracers();
     }
 
     void Start()
@@ -78,9 +81,12 @@ public class PlaneShooter : MonoBehaviour
             _overheated = false;
         }
 
-        if (_tracer.enabled && Time.time >= _tracerHideTime)
+        if (Time.time >= _tracerHideTime)
         {
-            _tracer.enabled = false;
+            for (int i = 0; i < _tracers.Length; i++)
+            {
+                if (_tracers[i].enabled) _tracers[i].enabled = false;
+            }
         }
     }
 
@@ -129,26 +135,44 @@ public class PlaneShooter : MonoBehaviour
         return _ownHealth.IsHostileTo(victim);
     }
 
-    void ShowTracer(Vector3 from, Vector3 to)
+    void ShowTracer(Vector3 fallbackFrom, Vector3 to)
     {
-        _tracer.enabled = true;
-        _tracer.SetPosition(0, from);
-        _tracer.SetPosition(1, to);
+        var hasMuzzles = MuzzlePoints != null && MuzzlePoints.Length > 0;
+        for (int i = 0; i < _tracers.Length; i++)
+        {
+            var from = hasMuzzles && MuzzlePoints[i] != null
+                ? MuzzlePoints[i].position
+                : fallbackFrom;
+            _tracers[i].enabled = true;
+            _tracers[i].SetPosition(0, from);
+            _tracers[i].SetPosition(1, to);
+        }
         _tracerHideTime = Time.time + Stats.TracerDuration;
     }
 
-    void ConfigureTracer()
+    void BuildTracers()
     {
-        _tracer.positionCount = 2;
-        _tracer.useWorldSpace = true;
-        _tracer.startWidth = Stats.TracerWidth;
-        _tracer.endWidth = Stats.TracerWidth;
-        _tracer.enabled = false;
-        if (_tracer.sharedMaterial == null)
+        var count = MuzzlePoints != null && MuzzlePoints.Length > 0 ? MuzzlePoints.Length : 1;
+        _tracers = new LineRenderer[count];
+
+        Material shared = null;
+        for (int i = 0; i < count; i++)
         {
-            _tracer.material = new Material(Shader.Find("Sprites/Default"));
+            var host = new GameObject($"Tracer_{i}");
+            host.transform.SetParent(transform, false);
+            var lr = host.AddComponent<LineRenderer>();
+
+            lr.positionCount = 2;
+            lr.useWorldSpace = true;
+            lr.startWidth = Stats.TracerWidth;
+            lr.endWidth = Stats.TracerWidth;
+            lr.enabled = false;
+            if (shared == null) shared = new Material(Shader.Find("Sprites/Default"));
+            lr.material = shared;
+            lr.startColor = Stats.TracerColor;
+            lr.endColor = new Color(Stats.TracerColor.r, Stats.TracerColor.g, Stats.TracerColor.b, 0f);
+
+            _tracers[i] = lr;
         }
-        _tracer.startColor = Stats.TracerColor;
-        _tracer.endColor = new Color(Stats.TracerColor.r, Stats.TracerColor.g, Stats.TracerColor.b, 0f);
     }
 }

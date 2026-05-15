@@ -1,0 +1,59 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f78077b4e356b34c961d5dd5d0ddba0, type: 3}
+  m_Name: Default.audio
+  m_EditorClassIdentifier: Assembly-CSharp::PlaneAudioStats
+  MinigunLoop: {fileID: 8300000, guid: c3d4938473324be4986f276b11133ad2, type: 3}
+  MinigunVolume: 0.6
+  MinigunSpatial:
+    MinDistance: 10
+    MaxDistance: 800
+    DopplerLevel: 1
+  MinigunReleaseTail: 0.12
+  MinigunPitchJitter: 0.05
+  CrashAlarm: {fileID: 8300000, guid: 69e00e9176bbd814caf0047793ca3701, type: 3}
+  CrashAlarmVolume: 0.7
+  CrashAlarmSpatial:
+    MinDistance: 15
+    MaxDistance: 500
+    DopplerLevel: 1
+  Explosion:
+  - {fileID: 8300000, guid: 696c379999fbbbc4dbf77fa2841e3e35, type: 3}
+  - {fileID: 8300000, guid: 662cfda5d9297294eb0ad56daf871781, type: 3}
+  - {fileID: 8300000, guid: 9ab49f49ba7a28945857b4305d13318a, type: 3}
+  - {fileID: 8300000, guid: b15caa3c77f6c3c498fc9598f918e7a9, type: 3}
+  - {fileID: 8300000, guid: 04cb57d3c8159b64e88722fa83ac8ec7, type: 3}
+  ExplosionVolume: 0.9
+  ExplosionSpatial:
+    MinDistance: 25
+    MaxDistance: 1200
+    DopplerLevel: 1
+  EnemyKill:
+  - {fileID: 8300000, guid: 5ac7845aef2640644a568d4efef6c22b, type: 3}
+  EnemyKillVolume: 0.9
+  GotHit:
+  - {fileID: 8300000, guid: 54430cfb807bbc74abfec7917beb1709, type: 3}
+  - {fileID: 8300000, guid: 0562455c1f506324191ddd89abacabaa, type: 3}
+  - {fileID: 8300000, guid: 246b17ca4c0f8df4eb18144bb273fcf7, type: 3}
+  GotHitVolume: 0.8
+  GotHitCooldown: 0.05
+  Overheat:
+  - {fileID: 8300000, guid: 0a6e6a7852841824094b9f1b16e7ff27, type: 3}
+  OverheatVolume: 0.8
+  LockOn:
+  - {fileID: 8300000, guid: ce04e4d6eaad7434a89c443c512827ef, type: 3}
+  LockOnVolume: 0.7
+  RadioBeeps:
+  - {fileID: 8300000, guid: 446d4cd4c6be21c4a959536c3323edc1, type: 3}
+  RadioBeepVolume: 0.8
+  RadioBeepIntervalMin: 12
+  RadioBeepIntervalMax: 30

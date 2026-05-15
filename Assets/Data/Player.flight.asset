@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0001, type: 3}
+  m_Name: Player.flight
+  m_EditorClassIdentifier: 
+  NormalThrust: 40
+  MaxThrust: 100
+  ThrustAgilityMultiplier: 1.8
+  ThrottleAccelRate: 0.5
+  ThrottleDecelRate: 0.7
+  PitchIncreaseSpeed: 60
+  InvertPitch: 0
+  RollIncreaseSpeed: 60
+  RollAutoLevelSpeed: 30
+  YawSpeed: 30
+  BankTurnSpeed: 4
+  RollResponseTime: 0.3
+  PitchResponseTime: 0.3
+  YawResponseTime: 0.3
+  StallSpeed: 13.3
+  LiftMultiplier: 1
+  DragMultiplier: 0.35
+  StallPitchThreshold: 0.35
+  MaxSinkSpeed: 8.3
+  StallSinkSpeed: 20
+  StallNoseDownRate: 90
+  StallRecoverFactor: 1.2
+  ServiceCeiling: 900
+  CeilingWarnBand: 200
+  CeilingNoseDownRate: 55
+  CeilingRecoverMargin: 70
+  CeilingMaxDiveAngle: 60

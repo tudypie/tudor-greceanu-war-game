@@ -38,3 +38,4 @@ MonoBehaviour:
   CeilingWarnBand: 200
   CeilingNoseDownRate: 55
   CeilingRecoverMargin: 70
+  CeilingMaxDiveAngle: 60

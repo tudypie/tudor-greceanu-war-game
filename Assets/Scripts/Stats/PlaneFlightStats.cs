@@ -80,4 +80,8 @@ public class PlaneFlightStats : ScriptableObject
     // Hysteresis: control only returns once back this far below the ceiling,
     // so it doesn't flip-flop on the line.
     public float CeilingRecoverMargin = 70f;
+    // The forced ceiling nose-down stops once the plane has pitched this far
+    // (degrees) below horizontal, so it mushes over into a descent instead of
+    // tucking into a near-vertical dive. 60 == nose 60 deg down, not 90.
+    public float CeilingMaxDiveAngle = 60f;
 }
