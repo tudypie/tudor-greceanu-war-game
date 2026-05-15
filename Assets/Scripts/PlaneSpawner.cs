@@ -26,6 +26,8 @@ public class PlaneSpawner : MonoBehaviour
     [Tooltip("Maximum vertical offset relative to the spawner's Y.")]
     public float MaxAltitudeOffset = 120f;
     public float MinWorldY = 0f;
+    [Tooltip("Spawned planes are lifted to at least this many metres above the sampled terrain surface, so they never appear inside or under a hill the spawn shell reaches into.")]
+    public float TerrainClearance = 40f;
 
     [Header("Out-Of-Sight")]
     public bool spawnOutOfSight = false;
@@ -34,6 +36,8 @@ public class PlaneSpawner : MonoBehaviour
 
     Transform _player;
     Camera _camera;
+    Terrain _terrain;
+    float _terrainBaseY;
     readonly List<PlaneAIController> _alive = new();
     float _nextSpawnAt;
 
@@ -47,6 +51,23 @@ public class PlaneSpawner : MonoBehaviour
             if (follow != null) _camera = follow.Camera;
         }
         if (_camera == null) _camera = Camera.main;
+        CacheTerrain();
+    }
+
+    void CacheTerrain()
+    {
+        _terrain = Terrain.activeTerrain;
+        if (_terrain == null) _terrain = FindFirstObjectByType<Terrain>();
+        _terrainBaseY = _terrain != null ? _terrain.transform.position.y : 0f;
+    }
+
+    // Ground Y under a world position via the terrain heightfield (no physics
+    // layers involved, mirroring PlaneAIController). float.MinValue when there
+    // is no terrain in the scene.
+    float TerrainGroundY(Vector3 worldPos)
+    {
+        if (_terrain == null) return float.MinValue;
+        return _terrainBaseY + _terrain.SampleHeight(worldPos);
     }
 
     void Update()
@@ -89,6 +110,16 @@ public class PlaneSpawner : MonoBehaviour
             candidate.y = origin.y + clampedDy;
         }
         if (candidate.y < MinWorldY) candidate.y = MinWorldY;
+
+        // Never spawn inside or under the terrain. The spawn shell can reach
+        // into hills/ridges that rise well above the spawner's Y, so lift the
+        // candidate to at least the sampled ground + clearance.
+        var groundY = TerrainGroundY(candidate);
+        if (groundY > float.MinValue * 0.5f)
+        {
+            var floorY = groundY + TerrainClearance;
+            if (candidate.y < floorY) candidate.y = floorY;
+        }
 
         if (!spawnOutOfSight || _camera == null)
         {

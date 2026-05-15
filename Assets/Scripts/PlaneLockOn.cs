@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -21,6 +22,11 @@ public class PlaneLockOn : MonoBehaviour
     const float EnemyRefreshInterval = 0.25f;
     float _nextEnemyRefresh;
     static readonly List<PlaneHealth> _hostiles = new();
+
+    // Raised the instant a lock completes (false -> true edge). A fresh
+    // target re-arms it, so switching locks fires it again.
+    public event Action LockAcquired;
+    bool _wasLocked;
 
     public bool HasLock => _lockedTarget != null && _lockProgress >= 1f;
     public Transform LockedTarget => HasLock ? _lockedTarget : null;
@@ -108,7 +114,7 @@ public class PlaneLockOn : MonoBehaviour
         if (Time.unscaledTime >= _nextEnemyRefresh)
         {
             _hostiles.Clear();
-            var found = Object.FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
+            var found = FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
             for (int i = 0; i < found.Length; i++)
             {
                 var ph = found[i];
@@ -175,6 +181,10 @@ public class PlaneLockOn : MonoBehaviour
                 _lockProgress = 0f;
             }
         }
+
+        var locked = _lockedTarget != null && _lockProgress >= 1f;
+        if (locked && !_wasLocked) LockAcquired?.Invoke();
+        _wasLocked = locked;
     }
 
     static Vector2 ClampToBox(Vector2 p, Rect box)

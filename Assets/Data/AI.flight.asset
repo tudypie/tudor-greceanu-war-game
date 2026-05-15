@@ -12,12 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0001, type: 3}
   m_Name: AI.flight
   m_EditorClassIdentifier: 
-  NormalThrust: 65
-  MaxThrust: 65
+  NormalThrust: 85
+  MaxThrust: 85
   ThrustAgilityMultiplier: 1.8
-  PitchIncreaseSpeed: 45
+  ThrottleAccelRate: 0.5
+  ThrottleDecelRate: 0.7
+  PitchIncreaseSpeed: 60
   InvertPitch: 0
-  RollIncreaseSpeed: 45
+  RollIncreaseSpeed: 60
   RollAutoLevelSpeed: 30
   YawSpeed: 30
   BankTurnSpeed: 4

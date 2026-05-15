@@ -8,6 +8,13 @@ public class PlaneShooter : MonoBehaviour
 
     public event Action<float> Hit;
     public event Action Killed;
+    // Raised once per round actually fired (after the heat/overheat gate).
+    // Audio drives a single reused looping source off this instead of
+    // instantiating an AudioSource per shot.
+    public event Action Shot;
+    // Raised once on the heat-limit (false -> true) edge. Fire() is gated by
+    // !_overheated, so this can't re-enter until heat recovers.
+    public event Action OverheatStarted;
 
     public int Kills { get; private set; }
 
@@ -28,6 +35,7 @@ public class PlaneShooter : MonoBehaviour
     public float Heat => _heat;
     public float HeatNormalized => Stats != null && Stats.MaxHeat > 0f ? _heat / Stats.MaxHeat : 0f;
     public bool Overheated => _overheated;
+    public bool IsFiring => Trigger && !_overheated;
     public float MuzzleOffsetZ => Stats != null ? Stats.MuzzleOffsetZ : 0f;
 
     void Awake()
@@ -89,7 +97,7 @@ public class PlaneShooter : MonoBehaviour
             if (victim != null && victim != _ownHealth && IsHostile(victim))
             {
                 var wasDead = victim.IsDead;
-                victim.TakeDamage(Stats.Damage);
+                victim.TakeDamage(Stats.Damage, _ownHealth);
                 Hit?.Invoke(Stats.Damage);
                 if (!wasDead && victim.IsDead)
                 {
@@ -104,12 +112,14 @@ public class PlaneShooter : MonoBehaviour
         }
 
         ShowTracer(origin, endPoint);
+        Shot?.Invoke();
 
         _heat += Stats.HeatPerShot;
         if (_heat >= Stats.MaxHeat)
         {
             _heat = Stats.MaxHeat;
             _overheated = true;
+            OverheatStarted?.Invoke();
         }
     }
 

@@ -35,23 +35,29 @@ MonoBehaviour:
   ExtendDistance: 300
   MergeBreakDistance: 60
   BadAspectDot: -0.3
-  FireConeDeg: 10
+  FireConeDeg: 18
   FireRange: 400
   FireMinDistance: 15
-  GunLockAcquireTime: 0.15
-  GunLockMaxCorrectionDeg: 16
+  GunLockAcquireTime: 0.05
+  GunLockMaxCorrectionDeg: 22
   GunAimNoiseDeg: 3
+  GunAimNoiseFrequency: 4
+  GunAimNoisePointBlankScale: 0.7
   GunLeadTime: 0.02
-  BurstMin: 0.5
-  BurstMax: 1
-  CooldownMin: 0.7
-  CooldownMax: 1.4
+  BurstMin: 0.8
+  BurstMax: 1.6
+  CooldownMin: 0.4
+  CooldownMax: 0.8
   AvoidanceRadius: 80
   AvoidanceAheadDot: 0.2
   AvoidanceStrength: 200
+  AvoidanceRefreshInterval: 0.5
   PatrolMinWorldY: 30
   TerrainClearance: 80
   TerrainLookAheadTime: 3.5
+  TerrainLookAheadMinSpeed: 20
+  FloorRecoverMarginFraction: 0.4
+  FloorRecoverMarginMin: 5
   TerrainProbeCount: 6
   AltitudeRecoverStrength: 800
   TerrainAvoidLateralStrength: 500

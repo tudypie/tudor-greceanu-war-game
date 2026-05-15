@@ -22,6 +22,12 @@ public class PlaneAIStats : ScriptableObject
     [Tooltip("A new candidate must be this fraction of the current target's distance (or closer) to steal the lock. <1 adds hysteresis.")]
     public float TargetSwitchHysteresis = 0.75f;
 
+    [Header("Retaliation (turn on whoever shoots it)")]
+    [Tooltip("When hit by a hostile, immediately drop everything and pursue the attacker — even if it was patrolling, mid break-off, or the attacker is beyond AcquireRange.")]
+    public bool RetaliateWhenShot = true;
+    [Tooltip("Seconds after the last hit the AI stays locked onto its attacker: it won't switch to a closer hostile, won't lose it by range, and skips its deliberate break-off. Each new hit refreshes the timer.")]
+    public float RetaliationDuration = 8f;
+
     [Header("Pursuit")]
     [Tooltip("Seconds of positional lag baked into the STEERING aim point. Small = the nose tracks tightly. 0 disables lag.")]
     public float LagSeconds = 0.08f;
@@ -58,8 +64,12 @@ public class PlaneAIStats : ScriptableObject
     public float GunLockAcquireTime = 0.15f;
     [Tooltip("Max degrees the assisted gun solution may bend off the nose. Hard jinkers that pull more than this still beat it.")]
     public float GunLockMaxCorrectionDeg = 16f;
-    [Tooltip("Gun spray (deg). ALWAYS applied — even point-blank dead on the tail (~0.7x) — and grows with range / off-tail aspect. Tuned so the AI is a poor shot: most rounds miss, only the occasional one chips you. Raise = misses more, lower = deadlier. This is the main difficulty knob.")]
-    public float GunAimNoiseDeg = 5f;
+    [Tooltip("Gun spray (deg). ALWAYS applied — even point-blank dead on the tail (scaled by GunAimNoisePointBlankScale) — and grows with range / off-tail aspect. This is the main difficulty knob: lower = the AI lands shots and is deadly, higher = it sprays and misses. Kept small so when it has your tail it actually hits.")]
+    public float GunAimNoiseDeg = 1.5f;
+    [Tooltip("Frequency (Hz) of the Perlin jitter on the noised shot. High enough that a burst sprays between shots instead of walking on as one coherent block.")]
+    public float GunAimNoiseFrequency = 9f;
+    [Tooltip("Fraction of GunAimNoiseDeg applied at point-blank range; it ramps up to the full value at FireRange. 1 = noise constant with range.")]
+    [Range(0f, 1f)] public float GunAimNoisePointBlankScale = 0.7f;
     [Tooltip("The gun is HITSCAN (instant raycast) so it does NOT lead — keep this tiny. It only compensates the sub-step between the AI's solve and the shot. 0.15+ will throw shots ahead of crossing targets.")]
     public float GunLeadTime = 0.02f;
 
@@ -75,6 +85,8 @@ public class PlaneAIStats : ScriptableObject
     public float AvoidanceAheadDot = 0.2f;
     [Tooltip("World units of sideways bias applied to the aim point when a plane is adjacent.")]
     public float AvoidanceStrength = 200f;
+    [Tooltip("How often (s) the nearby-planes list used for avoidance is rebuilt. Lower = more responsive, slightly more cost.")]
+    public float AvoidanceRefreshInterval = 0.5f;
 
     [Header("Terrain-Relative Altitude Floor")]
     [Tooltip("ABSOLUTE world-Y floor. The terrain floor is never allowed below this even over the sea / map edge.")]
@@ -83,14 +95,56 @@ public class PlaneAIStats : ScriptableObject
     public float TerrainClearance = 80f;
     [Tooltip("How far ahead (seconds of flight at current speed) the terrain is sampled so the AI climbs over a ridge BEFORE reaching it.")]
     public float TerrainLookAheadTime = 3.5f;
+    [Tooltip("Floor under the speed used for the terrain look-ahead distance, so a near-stalled plane still anticipates ground ahead.")]
+    public float TerrainLookAheadMinSpeed = 20f;
+    [Tooltip("Hard floor-recovery hysteresis margin = max(TerrainClearance * this, FloorRecoverMarginMin). The AI must claw back this far above the floor before it stops the emergency climb-out.")]
+    [Range(0f, 1f)] public float FloorRecoverMarginFraction = 0.4f;
+    [Tooltip("Absolute minimum (world units) for the floor-recovery hysteresis margin.")]
+    public float FloorRecoverMarginMin = 5f;
     [Tooltip("Number of ground samples taken between the plane and the look-ahead point. More = smoother anticipation, slightly more cost.")]
     [Range(2, 16)] public int TerrainProbeCount = 6;
     [Tooltip("Upward aim bias (world units) applied as the plane nears/drops toward the terrain floor. Keeps the AI from chasing into hills.")]
     public float AltitudeRecoverStrength = 800f;
-    [Tooltip("Sideways bias toward the lower flank when a tall ridge is dead ahead, so the AI goes AROUND a mountain instead of stalling up its face.")]
+    [Tooltip("DEPRECATED — superseded by the predictive Ground-Collision Avoidance block below; no longer read by PlaneAIController. Kept only so existing serialized .asset files don't break.")]
     public float TerrainAvoidLateralStrength = 500f;
 
     [Header("Service Ceiling (mirror of the floor, inverted)")]
     [Tooltip("How far below the flight model's ServiceCeiling the AI keeps. It clamps its aim point to (ServiceCeiling - this) and adds a soft DOWNWARD bias within this band (reusing AltitudeRecoverStrength), so it levels off instead of porpoising where the flight model would force its nose down anyway. Keep it comfortably larger than the flight CeilingRecoverMargin.")]
     public float CeilingClearance = 120f;
+
+    [Header("Predictive Ground-Collision Avoidance (GCAS)")]
+    [Tooltip("Master switch. When off, the AI falls back to the legacy soft altitude bias (Layer 1 floor clamp + Layer 3 hard pull-up still protect it).")]
+    public bool GcaEnabled = true;
+    [Tooltip("When off (default), the terrain threat is estimated by casting the TRUE velocity forward (cheap, robust). When on, it is estimated by simulating the plane's best-effort pull-up recovery (more accurate over rising terrain, slightly costlier). Flip on only if field-testing shows late triggers on the steepest ridges.")]
+    public bool GcaUsePredictiveSim = false;
+    [Tooltip("Seconds the plane needs to arrest a dive and start climbing. Used as the time reference for the threat ramp: a predicted ground contact closer than this in time saturates the threat. Larger = the AI reacts earlier / more cautiously.")]
+    public float GcaRecoverTime = 1.4f;
+    [Tooltip("Seconds of flight (along the true velocity / recovery path) sampled ahead for terrain. Should comfortably exceed GcaRecoverTime.")]
+    public float GcaProbeHorizonTime = 4f;
+    [Tooltip("Terrain is sampled every Nth integration sub-step (sub-step = physics dt). Lower = denser sampling (catches narrow spikes), slightly more cost.")]
+    [Range(1, 8)] public int GcaProbeStride = 3;
+    [Tooltip("Half-angle (deg) of the lateral sensing fan added on top of the estimated turn, so a banking plane checks the curved ground track it will actually fly.")]
+    public float GcaFanHalfAngleDeg = 8f;
+    [Tooltip("Reference depth (world units) a predicted floor breach is normalised against for the depth component of the threat. Roughly TerrainClearance.")]
+    public float GcaDepthRef = 80f;
+    [Tooltip("Time constant (s) for the threat RISING. Small = arms quickly for safety.")]
+    public float GcaThreatAttackTime = 0.10f;
+    [Tooltip("Time constant (s) for the threat FALLING. Large = releases slowly to avoid chatter.")]
+    public float GcaThreatReleaseTime = 0.60f;
+    [Tooltip("At/above this threat the graduated overlay begins (gentle wings-level + aim toward the climb-out point).")]
+    [Range(0f, 1f)] public float GcaSoftThreat = 0.25f;
+    [Tooltip("While Pursuing, at/above this threat the AI abandons the chase and enters TerrainEvade (climb out, then re-engage). Must exceed GcaReengageThreat.")]
+    [Range(0f, 1f)] public float GcaDisengageThreat = 0.55f;
+    [Tooltip("TerrainEvade exits once the threat falls to/below this (Schmitt: lower than GcaDisengageThreat) AND GcaEvadeMinTime has elapsed.")]
+    [Range(0f, 1f)] public float GcaReengageThreat = 0.30f;
+    [Tooltip("Minimum seconds the AI stays in TerrainEvade before it is allowed to re-engage, so it doesn't flip straight back into the dive.")]
+    public float GcaEvadeMinTime = 1f;
+    [Tooltip("At/above this threat the AI commands a decisive full nose-up, wings-level pull (bypasses proportional PitchGain) — the predictive equivalent of the hard floor override, fired while still recoverable.")]
+    [Range(0f, 1f)] public float GcaHardThreat = 0.80f;
+    [Tooltip("At/above this threat the guns go cold (no point shooting while saving the airframe).")]
+    [Range(0f, 1f)] public float GcaGunColdThreat = 0.50f;
+    [Tooltip("World units the climb-out aim point is placed ABOVE the worst floor ahead, so steering toward it actually clears the ridge with margin.")]
+    public float GcaClimbOutMargin = 80f;
+    [Tooltip("Number of samples taken along a patrol/break-off route so the straight path to the point is lifted above any hill it would otherwise pass through (not just the endpoint).")]
+    [Range(2, 16)] public int GcaRouteProbeCount = 6;
 }

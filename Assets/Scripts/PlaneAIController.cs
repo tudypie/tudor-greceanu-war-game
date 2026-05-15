@@ -30,7 +30,7 @@ using UnityEngine;
 [RequireComponent(typeof(PlaneHealth))]
 public class PlaneAIController : MonoBehaviour
 {
-    enum AIState { Patrolling, Pursuing, BreakOff }
+    enum AIState { Patrolling, Pursuing, BreakOff, TerrainEvade }
 
     PlaneFlightModel _model;
     PlaneShooter _shooter;
@@ -61,12 +61,17 @@ public class PlaneAIController : MonoBehaviour
     float _aimNoiseSeed;
     float _burstUntil;
     float _cooldownUntil;
-    // High enough that the aim jitters noticeably between shots in a burst
-    // (FireInterval ~0.08 s), so a burst sprays rather than drifting onto the
-    // target as one coherent block.
-    const float GunNoiseFrequency = 9f;
 
     bool _floorRecovering;
+
+    // Predictive ground-collision avoidance (GCAS).
+    float _threat;
+    float _evadeMinUntil;
+    float _gcaWorstFloorAhead;
+    Vector3 _gcaGroundDir = Vector3.forward;
+    Vector3 _gcaClimbOutPoint;
+    readonly float[] _rayYaw = new float[3];
+    readonly System.Collections.Generic.List<Vector3> _gcaTrack = new();
 
     // Terrain.
     Terrain _terrain;
@@ -76,7 +81,6 @@ public class PlaneAIController : MonoBehaviour
     // interval instead of every physics step).
     PlaneFlightModel[] _avoidPlanes;
     float _nextAvoidRefresh;
-    const float AvoidRefreshInterval = 0.5f;
 
     // Lagged-position ring buffer (steering lag + target velocity estimate).
     const int LagBufferSize = 32;
@@ -123,18 +127,34 @@ public class PlaneAIController : MonoBehaviour
 
         SampleTargetForLag();
         UpdateTargetLoss();
+
+        // Predictive ground-collision threat. Computed BEFORE UpdateState so
+        // the Pursuing -> TerrainEvade transition sees the current threat, and
+        // it drives the single-authority steering overlay below.
+        UpdateGroundThreat();
+
         UpdateState();
 
-        var aimPoint = ResolveAimPoint()
-            + ComputeAvoidance()
-            + ComputeTerrainLateral();
+        // As the terrain threat rises, terrain wins: pursuit lead and
+        // plane-vs-plane avoidance are suppressed, the aim blends toward the
+        // recoverable climb-out point, and the wings roll level.
+        var w = Stats.GcaEnabled
+            ? Mathf.SmoothStep(0f, 1f,
+                Mathf.InverseLerp(Stats.GcaSoftThreat, Stats.GcaHardThreat, _threat))
+            : 0f;
+        var avoidanceScale = 1f - w;
+        var leadScale = 1f - w;
+
+        var aimPoint = ResolveAimPoint(leadScale)
+            + ComputeAvoidance() * avoidanceScale;
 
         // Layer 1: never aim below the anticipated terrain floor.
         var anticipatedFloor = AnticipatedFloorY();
         if (aimPoint.y < anticipatedFloor) aimPoint.y = anticipatedFloor;
 
-        // Layer 2: soft upward bias as we sink toward that floor.
-        aimPoint += ComputeAltitudeSoftBias(anticipatedFloor);
+        // Legacy fallback only (GCAS off): soft upward bias toward the floor.
+        if (!Stats.GcaEnabled)
+            aimPoint += ComputeAltitudeSoftBias(anticipatedFloor);
 
         // Ceiling (mirror of the floor): keep the aim point below the soft cap
         // and add a soft downward bias as we climb into it — but only when the
@@ -146,6 +166,10 @@ public class PlaneAIController : MonoBehaviour
             if (aimPoint.y > ceilingCap) aimPoint.y = ceilingCap;
             aimPoint += ComputeCeilingSoftBias(ceilingCap);
         }
+
+        // GCAS overlay: blend the whole aim toward the recoverable climb-out
+        // point as the threat rises (replaces the additive soft bias).
+        if (w > 0f) aimPoint = Vector3.Lerp(aimPoint, _gcaClimbOutPoint, w);
 
         var toAim = aimPoint - _transform.position;
         var aimDistance = toAim.magnitude;
@@ -166,6 +190,21 @@ public class PlaneAIController : MonoBehaviour
         _smoothRoll = Mathf.Lerp(_smoothRoll, targetRoll, alpha);
         _smoothYaw = Mathf.Lerp(_smoothYaw, targetYaw, alpha);
 
+        // GCAS overlay: roll toward wings-level as the threat rises, so pitch
+        // authority becomes climb instead of carving a turn.
+        if (w > 0f) _smoothRoll = Mathf.Lerp(_smoothRoll, 0f, w);
+
+        // GCAS overlay: at high threat command a decisive full nose-up,
+        // wings-level pull (bypasses proportional PitchGain) — the predictive
+        // equivalent of the Layer-3 override, fired while still recoverable.
+        var gcaHardPull = Stats.GcaEnabled && _threat >= Stats.GcaHardThreat;
+        if (gcaHardPull)
+        {
+            _smoothPitch = ClimbInputSign();
+            _smoothRoll = 0f;
+            _smoothYaw = 0f;
+        }
+
         _model.PitchInput = _smoothPitch;
         _model.RollInput = _smoothRoll;
         _model.YawInput = _smoothYaw;
@@ -175,7 +214,8 @@ public class PlaneAIController : MonoBehaviour
         // AI abandons everything and climbs out wings-level, guns cold, until
         // it has clawed back a hysteresis margin above the floor.
         var floorNow = CurrentFloorY();
-        var margin = Mathf.Max(Stats.TerrainClearance * 0.4f, 5f);
+        var margin = Mathf.Max(Stats.TerrainClearance * Stats.FloorRecoverMarginFraction,
+            Stats.FloorRecoverMarginMin);
         var y = _transform.position.y;
         if (_floorRecovering)
         {
@@ -188,13 +228,24 @@ public class PlaneAIController : MonoBehaviour
 
         if (_floorRecovering)
         {
-            var climbPitch = _model.InvertPitch ? 1f : -1f;
+            var climbPitch = ClimbInputSign();
             _smoothPitch = climbPitch;
             _smoothRoll = 0f;
             _smoothYaw = 0f;
             _model.PitchInput = climbPitch;
             _model.RollInput = 0f;   // 0 lets the flight model auto-level the wings
             _model.YawInput = 0f;
+            if (_shooter != null)
+            {
+                _shooter.UseAimDirection = false;
+                _shooter.Trigger = false;
+            }
+            return;
+        }
+
+        // GCAS overlay: guns cold while saving the airframe.
+        if (gcaHardPull || (Stats.GcaEnabled && _threat >= Stats.GcaGunColdThreat))
+        {
             if (_shooter != null)
             {
                 _shooter.UseAimDirection = false;
@@ -225,6 +276,21 @@ public class PlaneAIController : MonoBehaviour
 
     float CurrentFloorY() => WorkingFloorAt(_transform.position);
 
+    // Highest working floor sampled along the straight segment a..b, so a
+    // waypoint / break-off point can be lifted above any hill the path to it
+    // would otherwise pass straight through (not just its endpoint).
+    float WorstFloorAlong(Vector3 a, Vector3 b, int samples)
+    {
+        var n = Mathf.Clamp(samples, 2, 16);
+        var worst = float.MinValue;
+        for (int i = 0; i <= n; i++)
+        {
+            var f = WorkingFloorAt(Vector3.Lerp(a, b, i / (float)n));
+            if (f > worst) worst = f;
+        }
+        return worst;
+    }
+
     Vector3 FlatForward()
     {
         var f = _transform.forward;
@@ -235,7 +301,8 @@ public class PlaneAIController : MonoBehaviour
     }
 
     float LookAheadDistance() =>
-        Mathf.Max(_model.CurrentSpeed, 20f) * Mathf.Max(Stats.TerrainLookAheadTime, 0f);
+        Mathf.Max(_model.CurrentSpeed, Stats.TerrainLookAheadMinSpeed)
+        * Mathf.Max(Stats.TerrainLookAheadTime, 0f);
 
     // Highest working floor between here and the look-ahead point, so a ridge
     // ahead lifts the floor (and the clamped aim point) before we reach it.
@@ -288,36 +355,146 @@ public class PlaneAIController : MonoBehaviour
         return Vector3.down * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
-    // If a tall ridge sits dead ahead, bias sideways toward whichever flank is
-    // lower so the AI flies AROUND a mountain instead of stalling up its face.
-    Vector3 ComputeTerrainLateral()
+    // --- Predictive ground-collision avoidance (GCAS) ----------------------
+
+    // Signed pitch input that produces a nose-UP command for this airframe
+    // (single source of truth; reused by the Layer-3 backstop).
+    float ClimbInputSign() => _model.InvertPitch ? 1f : -1f;
+
+    // The plane's TRUE travel velocity (so a dive is sensed down its real
+    // path, not the horizontal nose projection). Falls back to the nose when
+    // near-stationary (e.g. the spawn frame before the flight model has run).
+    Vector3 CurrentVelocity()
     {
-        if (_terrain == null || Stats.TerrainAvoidLateralStrength <= 0f) return Vector3.zero;
+        var body = _model.Body;
+        var v = body != null ? body.linearVelocity : Vector3.zero;
+        if (v.sqrMagnitude < 1f) v = _transform.forward * Mathf.Max(_model.CurrentSpeed, 1f);
+        return v;
+    }
+
+    static Vector3 FlatDir(Vector3 v)
+    {
+        v.y = 0f;
+        return v.sqrMagnitude < 0.0001f ? Vector3.forward : v.normalized;
+    }
+
+    // Projects the plane's trajectory forward and turns the worst predicted
+    // terrain breach into a continuous threat in [0,1], plus a recoverable
+    // climb-out point. Two trajectory models, selected by GcaUsePredictiveSim:
+    //   * off (default): straight line along the true velocity — cheap and
+    //     conservative (assumes no pull-up).
+    //   * on: simulates the best-effort pull-up recovery (reaction + actuator
+    //     lag, rate cap, climb/dive drag) — relaxes false positives over
+    //     rising terrain.
+    // A 3-ray lateral fan (estimated mid-horizon turn ± a fixed spread) covers
+    // the curved ground track a banking plane will actually fly.
+    void UpdateGroundThreat()
+    {
+        if (!Stats.GcaEnabled || _terrain == null)
+        {
+            _threat = 0f;
+            if (_gcaTrack.Count > 0) _gcaTrack.Clear();
+            return;
+        }
 
         var pos = _transform.position;
-        var look = LookAheadDistance();
-        if (look <= 0.01f) return Vector3.zero;
+        var vel = CurrentVelocity();
+        var speed = Mathf.Max(vel.magnitude, 1f);
+        _gcaGroundDir = FlatDir(vel);
 
-        var fwd = FlatForward();
-        var lookPoint = pos + fwd * look;
-        var centreFloor = WorkingFloorAt(lookPoint);
+        var step = Mathf.Max(Time.fixedDeltaTime, 0.0001f);
+        var horizon = Mathf.Max(Stats.GcaProbeHorizonTime, step * 4f);
+        int steps = Mathf.Clamp(Mathf.CeilToInt(horizon / step), 4, 600);
+        int stride = Mathf.Clamp(Stats.GcaProbeStride, 1, 8);
 
-        // Only react if the path ahead actually climbs above us.
-        var exceed = centreFloor - pos.y;
-        if (exceed <= 0f) return Vector3.zero;
+        var bank = _transform.right.y;
+        var turnRate = _model.Stats != null ? -bank * _model.Stats.BankTurnSpeed : 0f;
+        var midTurn = turnRate * (horizon * 0.5f);
+        var fan = Mathf.Max(Stats.GcaFanHalfAngleDeg, 0f);
+        _rayYaw[0] = midTurn;
+        _rayYaw[1] = midTurn - fan;
+        _rayYaw[2] = midTurn + fan;
 
-        var right = new Vector3(fwd.z, 0f, -fwd.x);
-        var lat = look * 0.5f;
-        var leftFloor = WorkingFloorAt(lookPoint - right * lat);
-        var rightFloor = WorkingFloorAt(lookPoint + right * lat);
+        var useSim = Stats.GcaUsePredictiveSim && _model.Stats != null;
+        var tauR = Mathf.Max(Stats.ReactionTime, 0.0001f);
+        var tauP = _model.Stats != null ? Mathf.Max(_model.Stats.PitchResponseTime, 0.0001f) : 0.0001f;
+        var rMax = _model.Stats != null ? _model.Stats.PitchIncreaseSpeed : 60f;
+        var thrust = _model.Stats != null ? _model.Stats.NormalThrust : speed;
+        var drag = _model.Stats != null ? _model.Stats.DragMultiplier : 0f;
+        var stallSpd = _model.Stats != null ? _model.Stats.StallSpeed : 0f;
+        const float sinkBias = 2f; // conservative stand-in for un-modelled sink
 
-        // Already going to need a big climb; nudge toward the lower side.
-        var diff = leftFloor - rightFloor;
-        if (Mathf.Abs(diff) < 1f) return Vector3.zero;
+        var maxBreach = 0f;
+        var tHit = float.PositiveInfinity;
+        var worstFloorAhead = WorkingFloorAt(pos);
 
-        var sign = diff > 0f ? 1f : -1f; // right side lower -> bias +right
-        var weight = Mathf.Clamp01(exceed / Mathf.Max(Stats.TerrainClearance, 1f));
-        return right * sign * Stats.TerrainAvoidLateralStrength * weight;
+        _gcaTrack.Clear();
+
+        for (int r = 0; r < 3; r++)
+        {
+            var dir3 = Quaternion.AngleAxis(_rayYaw[r], Vector3.up) * vel;
+            var p = pos;
+            var prevFloor = WorkingFloorAt(p);
+
+            // Recovery-sim state (only used when useSim).
+            var ground = FlatDir(dir3);
+            var thetaDeg = Mathf.Asin(Mathf.Clamp(dir3.y / speed, -1f, 1f)) * Mathf.Rad2Deg;
+            var inputRamp = 0f;
+            var rate = 0f;
+
+            for (int i = 1; i <= steps; i++)
+            {
+                if (useSim)
+                {
+                    inputRamp = Mathf.Lerp(inputRamp, 1f, 1f - Mathf.Exp(-step / tauR));
+                    rate = Mathf.Lerp(rate, rMax * inputRamp, 1f - Mathf.Exp(-step / tauP));
+                    thetaDeg = Mathf.Min(thetaDeg + rate * step, 85f);
+                    var thetaRad = thetaDeg * Mathf.Deg2Rad;
+                    var spd = Mathf.Max(Mathf.Max(thrust * (1f - Mathf.Sin(thetaRad) * drag), stallSpd), 1f);
+                    p += ground * (spd * Mathf.Cos(thetaRad) * step);
+                    p.y += (spd * Mathf.Sin(thetaRad) - sinkBias) * step;
+                }
+                else
+                {
+                    p += dir3 * step; // straight line along the true velocity
+                }
+
+                if (i % stride != 0 && i != steps) continue;
+
+                var f = WorkingFloorAt(p);
+                var floorBracket = Mathf.Max(f, prevFloor); // conservative vs. spikes
+                prevFloor = f;
+                if (f > worstFloorAhead) worstFloorAhead = f;
+
+                var breach = floorBracket - p.y;
+                if (breach > maxBreach) maxBreach = breach;
+                if (breach > 0f && i * step < tHit) tHit = i * step;
+
+                if (r == 0) _gcaTrack.Add(p); // centre ray, for gizmos
+            }
+        }
+
+        var depthScore = Mathf.Clamp01(maxBreach / Mathf.Max(Stats.GcaDepthRef, 0.0001f));
+        var recT = Mathf.Max(Stats.GcaRecoverTime, 0.0001f);
+        var timeScore = float.IsInfinity(tHit) ? 0f : Mathf.Clamp01((recT - tHit) / recT);
+        var raw = Mathf.Max(depthScore, timeScore); // single authority, not additive
+
+        // Asymmetric smoothing: arm fast for safety, release slow to kill chatter.
+        var tau = raw > _threat
+            ? Mathf.Max(Stats.GcaThreatAttackTime, 0.0001f)
+            : Mathf.Max(Stats.GcaThreatReleaseTime, 0.0001f);
+        _threat = Mathf.Lerp(_threat, raw, 1f - Mathf.Exp(-step / tau));
+
+        // Recoverable climb-out point: out along the ground track, lifted clear
+        // of the highest floor ahead. Clamp under the soft ceiling unless a
+        // ridge pokes above it (then terrain wins — same guard as the aim clamp).
+        var lookDist = Mathf.Max(speed * recT, speed * step * steps * 0.5f);
+        var cp = pos + _gcaGroundDir * Mathf.Max(lookDist, 1f);
+        cp.y = worstFloorAhead + Stats.GcaClimbOutMargin;
+        var cap = CeilingCapY();
+        if (cap > AnticipatedFloorY() && cp.y > cap) cp.y = cap;
+        _gcaClimbOutPoint = cp;
+        _gcaWorstFloorAhead = worstFloorAhead;
     }
 
     // --- Plane-vs-plane avoidance ------------------------------------------
@@ -329,7 +506,7 @@ public class PlaneAIController : MonoBehaviour
         if (_avoidPlanes == null || Time.fixedTime >= _nextAvoidRefresh)
         {
             _avoidPlanes = Object.FindObjectsByType<PlaneFlightModel>(FindObjectsSortMode.None);
-            _nextAvoidRefresh = Time.fixedTime + AvoidRefreshInterval;
+            _nextAvoidRefresh = Time.fixedTime + Stats.AvoidanceRefreshInterval;
         }
 
         var bias = Vector3.zero;
@@ -364,14 +541,23 @@ public class PlaneAIController : MonoBehaviour
 
     // --- Aim point ----------------------------------------------------------
 
-    Vector3 ResolveAimPoint()
+    Vector3 ResolveAimPoint(float leadScale)
     {
         switch (_state)
         {
             case AIState.Pursuing:
-                return _target != null ? PredictedTargetPoint(Stats.SteerLeadTime) : _patrolWaypoint;
+                return _target != null
+                    ? PredictedTargetPoint(Stats.SteerLeadTime * leadScale)
+                    : _patrolWaypoint;
             case AIState.BreakOff:
                 return _breakAimPoint;
+            case AIState.TerrainEvade:
+                // Extend along the current ground track, climbing well clear of
+                // the worst floor ahead. Recomputed each step (path-safe by
+                // construction); the GCAS overlay still stacks on top.
+                var p = _transform.position + _gcaGroundDir * Stats.ExtendDistance;
+                p.y = _gcaWorstFloorAhead + 2f * Stats.GcaClimbOutMargin;
+                return p;
             default:
                 return _patrolWaypoint;
         }
@@ -412,6 +598,14 @@ public class PlaneAIController : MonoBehaviour
                     EnterPatrolling();
                     return;
                 }
+                // Terrain takes priority over the deliberate/merge break-offs:
+                // abandon the chase and climb out rather than grind into the
+                // ground. Keeps _target and does not touch the break-off budget.
+                if (Stats.GcaEnabled && _threat >= Stats.GcaDisengageThreat)
+                {
+                    EnterTerrainEvade();
+                    return;
+                }
                 // Scheduled, deliberate break-off (gated by the cooldown).
                 if (Time.fixedTime >= _engageBreakAt && Time.fixedTime >= _nextBreakAllowed)
                 {
@@ -437,6 +631,20 @@ public class PlaneAIController : MonoBehaviour
                 {
                     if (_target != null) EnterPursuing();
                     else EnterPatrolling();
+                }
+                break;
+
+            case AIState.TerrainEvade:
+                // Condition-based: stay until the threat has cleared (Schmitt:
+                // exits at the lower GcaReengageThreat) AND a minimum dwell has
+                // elapsed, so it doesn't flip straight back into the dive.
+                if (Time.fixedTime >= _evadeMinUntil &&
+                    _threat <= Stats.GcaReengageThreat)
+                {
+                    if (_target != null && !_target.IsDead && !TargetLostByRange())
+                        EnterPursuing();
+                    else
+                        EnterPatrolling();
                 }
                 break;
         }
@@ -471,13 +679,25 @@ public class PlaneAIController : MonoBehaviour
                 away = (fwd - toT.normalized * 0.5f).normalized;
         }
         _breakAimPoint = _transform.position + away * Stats.ExtendDistance;
-        var floor = WorkingFloorAt(_breakAimPoint);
+        // Lift above the worst floor along the extend leg, not just its end.
+        var floor = WorstFloorAlong(_transform.position, _breakAimPoint,
+            Stats.GcaRouteProbeCount);
         if (_breakAimPoint.y < floor) _breakAimPoint.y = floor;
 
         var duration = Random.Range(Stats.BreakOffDurationMin, Stats.BreakOffDurationMax);
         _breakOffUntil = Time.fixedTime + duration;
         // No second break-off until the cooldown after this one ends.
         _nextBreakAllowed = _breakOffUntil + Stats.BreakOffCooldown;
+    }
+
+    // Terrain disengage. Unlike BreakOff this is condition-based (lasts as long
+    // as the terrain threat persists) and deliberately leaves the target and
+    // the player-window break-off budget (_engageBreakAt / _nextBreakAllowed /
+    // _breakOffUntil) untouched.
+    void EnterTerrainEvade()
+    {
+        _state = AIState.TerrainEvade;
+        _evadeMinUntil = Time.fixedTime + Mathf.Max(Stats.GcaEvadeMinTime, 0f);
     }
 
     // --- Targeting ----------------------------------------------------------
@@ -602,27 +822,28 @@ public class PlaneAIController : MonoBehaviour
 
                     // The decision to fire is made on the UNDEGRADED solution:
                     // the AI shoots when it genuinely has the target lined up
-                    // (and terrain isn't masking it). This must stay decoupled
-                    // from the noised shot below — gating on the noisy aim
-                    // would make it only fire when the spray happens to align,
-                    // i.e. it'd still mostly hit. We want it to fire and miss.
+                    // (and terrain isn't masking it). Keep it decoupled from the
+                    // noised shot below so the gate stays clean — it fires on a
+                    // true solution and the small residual spray decides spread,
+                    // not whether it shoots at all.
                     var aimToTarget = (targetPos - muzzle).normalized;
                     wantsFire = Vector3.Dot(solution.normalized, aimToTarget) > coneCos
                                 && HasShotLineOfSight(muzzle, targetPos, dist);
 
-                    // The SHOT is deliberately a poor gunner: noise is always
-                    // present (even point-blank, dead on the tail) and grows
-                    // with range / off-tail aspect, so the majority of rounds
-                    // miss and only the occasional one chips the player. Fast
-                    // jitter so a burst sprays instead of walking on as a block.
+                    // The SHOT carries a SMALL residual spray (GunAimNoiseDeg),
+                    // scaled up a little with range / off-tail aspect, so bursts
+                    // aren't robot-perfect but still land on a target it has
+                    // lined up. Fast jitter so a burst spreads slightly instead
+                    // of walking on as one coherent block.
                     var rangeFrac = Mathf.Clamp01(dist / Mathf.Max(Stats.FireRange, 0.0001f));
                     var aspectErr = 1f - Mathf.Clamp01(noseDot);
-                    var noiseDeg = Stats.GunAimNoiseDeg * (0.7f + 0.3f * rangeFrac) * (1f + aspectErr);
+                    var rangeScale = Mathf.Lerp(Stats.GunAimNoisePointBlankScale, 1f, rangeFrac);
+                    var noiseDeg = Stats.GunAimNoiseDeg * rangeScale * (1f + aspectErr);
 
                     var aim = solution;
                     if (noiseDeg > 0.0001f)
                     {
-                        var nt = Time.time * GunNoiseFrequency;
+                        var nt = Time.time * Stats.GunAimNoiseFrequency;
                         var yaw = (Mathf.PerlinNoise(_aimNoiseSeed, nt) - 0.5f) * 2f * noiseDeg;
                         var pitch = (Mathf.PerlinNoise(nt, _aimNoiseSeed + 31.7f) - 0.5f) * 2f * noiseDeg;
                         aim = Quaternion.AngleAxis(yaw, _transform.up)
@@ -763,7 +984,10 @@ public class PlaneAIController : MonoBehaviour
         var horiz = Random.insideUnitCircle * Stats.PatrolRadius;
         var dy = Random.Range(-Stats.PatrolVerticalRange, Stats.PatrolVerticalRange);
         _patrolWaypoint = _anchor + new Vector3(horiz.x, dy, horiz.y);
-        var floor = WorkingFloorAt(_patrolWaypoint);
+        // Lift above the worst floor along the WHOLE route, not just the
+        // endpoint, so the straight leg doesn't fly through a hill.
+        var floor = WorstFloorAlong(_transform.position, _patrolWaypoint,
+            Stats.GcaRouteProbeCount);
         if (_patrolWaypoint.y < floor) _patrolWaypoint.y = floor;
         _patrolWaypointDeadline = Time.fixedTime + Stats.PatrolWaypointTimeout;
     }
@@ -773,10 +997,28 @@ public class PlaneAIController : MonoBehaviour
     void OnDrawGizmos()
     {
         var playing = Application.isPlaying;
-        var isBreak = playing && _state == AIState.BreakOff;
-        var isChase = playing && _state == AIState.Pursuing;
-        Gizmos.color = isBreak ? Color.yellow : (isChase ? Color.red : Color.green);
+        Color stateColor;
+        if (playing && _state == AIState.TerrainEvade) stateColor = Color.magenta;
+        else if (playing && _state == AIState.BreakOff) stateColor = Color.yellow;
+        else if (playing && _state == AIState.Pursuing) stateColor = Color.red;
+        else stateColor = Color.green;
+        Gizmos.color = stateColor;
         DrawArrow(transform.position, transform.forward, 50f);
+
+        if (!playing || Stats == null || !Stats.GcaEnabled) return;
+
+        // Predicted ground track, coloured by the live terrain threat
+        // (green -> amber -> red), with a marker at the recoverable climb-out
+        // point. Use this to confirm the threat ramps BEFORE impact.
+        var threatColor = _threat < 0.5f
+            ? Color.Lerp(Color.green, Color.yellow, _threat * 2f)
+            : Color.Lerp(Color.yellow, Color.red, (_threat - 0.5f) * 2f);
+        Gizmos.color = threatColor;
+        for (int i = 1; i < _gcaTrack.Count; i++)
+            Gizmos.DrawLine(_gcaTrack[i - 1], _gcaTrack[i]);
+
+        Gizmos.color = Color.cyan;
+        Gizmos.DrawWireSphere(_gcaClimbOutPoint, 15f);
     }
 
     static void DrawArrow(Vector3 origin, Vector3 dir, float length)

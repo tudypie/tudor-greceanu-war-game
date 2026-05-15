@@ -1,14 +1,27 @@
+using System;
 using UnityEngine;
 
 [RequireComponent(typeof(PlaneHealth))]
 [RequireComponent(typeof(Rigidbody))]
 public class PlaneCrash : MonoBehaviour
 {
+    // Raised once, the instant the airframe explodes (collision or ground
+    // impact), before the GameObject is destroyed. Audio reads transform
+    // here and spawns a DETACHED one-shot, since this object dies same frame.
+    public event Action Exploded;
+
     PlaneHealth _health;
     Rigidbody _rigidbody;
     bool _crashed;
+    bool _exploded;
     Quaternion _diveRotation;
     float _rollAngle;
+
+    // Terrain backstop (no physics layers involved, mirroring
+    // PlaneAIController / PlaneSpawner) so a downed plane is guaranteed to
+    // explode at the surface even when the collider misses it.
+    Terrain _terrain;
+    float _terrainBaseY;
 
     public PlaneCrashStats Stats;
     public Behaviour[] DisableOnCrash;
@@ -20,6 +33,9 @@ public class PlaneCrash : MonoBehaviour
         _rigidbody = GetComponent<Rigidbody>();
         _health.DestroyOnDeath = false;
         _health.Died += Crash;
+        _terrain = Terrain.activeTerrain;
+        if (_terrain == null) _terrain = FindFirstObjectByType<Terrain>();
+        _terrainBaseY = _terrain != null ? _terrain.transform.position.y : 0f;
         if (Stats == null)
         {
             Debug.LogError($"{nameof(PlaneCrash)} on {name} has no Stats assigned.", this);
@@ -37,6 +53,16 @@ public class PlaneCrash : MonoBehaviour
         _crashed = true;
         if (Stats == null) return;
 
+        // Cut all control + flight authority. PlaneFlightModel is the one that
+        // hard-assigns rigidbody.linearVelocity every physics step, so while it
+        // (or the player/AI feeding it input) is alive the plane keeps flying
+        // and stays steerable instead of going down. Done programmatically so
+        // it can't be defeated by a missing DisableOnCrash inspector entry;
+        // the array is still honoured for any extra designer-specified scripts.
+        DisableComponent<PlaneFlightModel>();
+        DisableComponent<PlanePlayerInput>();
+        DisableComponent<PlaneAIController>();
+        DisableComponent<PlaneShooter>();
         if (DisableOnCrash != null)
         {
             for (var i = 0; i < DisableOnCrash.Length; i++)
@@ -50,6 +76,15 @@ public class PlaneCrash : MonoBehaviour
         _rigidbody.angularDamping = Stats.AngularDamping;
         _rigidbody.angularVelocity = Vector3.zero;
 
+        // Straight down: drop the forward airspeed PlaneFlightModel was holding
+        // (and any upward coast if it was shot mid-climb) so gravity takes it
+        // vertically, instead of arcing far downrange on its last velocity.
+        var v = _rigidbody.linearVelocity;
+        v.x = 0f;
+        v.z = 0f;
+        if (v.y > 0f) v.y = 0f;
+        _rigidbody.linearVelocity = v;
+
         var flatForward = new Vector3(transform.forward.x, 0f, transform.forward.z);
         if (flatForward.sqrMagnitude < 0.0001f) flatForward = Vector3.forward;
         _diveRotation = Quaternion.LookRotation(Vector3.down, flatForward.normalized);
@@ -60,7 +95,17 @@ public class PlaneCrash : MonoBehaviour
             Smoke.Play();
         }
 
-        Destroy(gameObject, Stats.DestroyDelay);
+        // No timed destroy here: a downed plane must keep diving until it
+        // actually reaches the ground. Destruction (+ explosion FX/SFX) only
+        // happens on ground impact, in OnCollisionEnter -> Explode().
+    }
+
+    // Disable the component of type T on this plane if it has one. Behaviour
+    // (MonoBehaviour) so .enabled actually stops its Update/FixedUpdate.
+    void DisableComponent<T>() where T : Behaviour
+    {
+        var c = GetComponent<T>();
+        if (c != null) c.enabled = false;
     }
 
     void FixedUpdate()
@@ -73,6 +118,17 @@ public class PlaneCrash : MonoBehaviour
         var target = _diveRotation * Quaternion.AngleAxis(_rollAngle, Vector3.forward);
         _rigidbody.MoveRotation(Quaternion.Slerp(_rigidbody.rotation, target, alpha));
         _rigidbody.angularVelocity = Vector3.zero;
+
+        // Terrain backstop: OnCollisionEnter can miss a fast dive (tunnelling
+        // or grazing the TerrainCollider) or be filtered out by GroundMask,
+        // leaving the plane diving/sliding forever with smoke on. Sampling the
+        // heightfield directly is layer-independent and always catches it.
+        if (Stats.DestroyOnGroundImpact && Stats.TerrainImpactHeight > 0f && _terrain != null)
+        {
+            var pos = transform.position;
+            var groundY = _terrainBaseY + _terrain.SampleHeight(pos);
+            if (pos.y <= groundY + Stats.TerrainImpactHeight) Explode();
+        }
     }
 
     void OnCollisionEnter(Collision collision)
@@ -90,6 +146,11 @@ public class PlaneCrash : MonoBehaviour
 
     void Explode()
     {
+        // A second collision the same frame can re-enter before the deferred
+        // Destroy resolves; guard so the explosion (FX + SFX) fires once.
+        if (_exploded) return;
+        _exploded = true;
+        Exploded?.Invoke();
         if (Stats != null && Stats.ExplosionPrefab != null)
         {
             Instantiate(Stats.ExplosionPrefab, transform.position, transform.rotation);

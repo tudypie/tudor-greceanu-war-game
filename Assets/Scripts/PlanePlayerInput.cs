@@ -45,7 +45,9 @@ public class PlanePlayerInput : MonoBehaviour
         _model.PitchInput = move.y;
         _model.RollInput = move.x;
         _model.YawInput = yaw;
-        _model.Boost = _jumpAction.IsPressed();
+        // Cruise at full throttle by default; holding space brakes the
+        // plane down toward NormalThrust (max -> min) instead of boosting.
+        _model.Boost = !_jumpAction.IsPressed();
     }
 
     void Update()
