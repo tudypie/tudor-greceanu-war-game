@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0002, type: 3}
   m_Name: Default.weapon
   m_EditorClassIdentifier: 
-  Range: 1000
+  Range: 1500
   FireInterval: 0.08
   MuzzleOffsetZ: 1.333
   Damage: 8

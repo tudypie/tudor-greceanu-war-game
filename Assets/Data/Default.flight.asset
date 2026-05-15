@@ -12,9 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0001, type: 3}
   m_Name: Default.flight
   m_EditorClassIdentifier: 
-  NormalThrust: 56
-  MaxThrust: 66.7
+  NormalThrust: 20
+  MaxThrust: 80
   ThrustAgilityMultiplier: 1.8
+  ThrottleAccelRate: 0.5
+  ThrottleDecelRate: 0.7
   PitchIncreaseSpeed: 60
   InvertPitch: 0
   RollIncreaseSpeed: 60
@@ -32,3 +34,7 @@ MonoBehaviour:
   StallSinkSpeed: 20
   StallNoseDownRate: 90
   StallRecoverFactor: 1.2
+  ServiceCeiling: 900
+  CeilingWarnBand: 200
+  CeilingNoseDownRate: 55
+  CeilingRecoverMargin: 70

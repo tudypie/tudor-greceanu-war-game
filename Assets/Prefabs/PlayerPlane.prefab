@@ -150,6 +150,7 @@ GameObject:
   - component: {fileID: 6468007553995725376}
   - component: {fileID: 9200532337346304528}
   - component: {fileID: 6799728155010828906}
+  - component: {fileID: 7733001122334455667}
   m_Layer: 0
   m_Name: PlayerPlane
   m_TagString: Untagged
@@ -417,6 +418,21 @@ MonoBehaviour:
   HitColor: {r: 1, g: 1, b: 1, a: 0.95}
   LockedHitColor: {r: 1, g: 0.35, b: 0.25, a: 1}
   ReferenceHeight: 1080
+--- !u!114 &7733001122334455667
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 337581975770713849}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9f1c7a2b4d6e8f0a1b3c5d7e9f0a1b2c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  FontSize: 26
+  TopMargin: 110
+  FlashHz: 4
 --- !u!1 &697437293563902324
 GameObject:
   m_ObjectHideFlags: 0

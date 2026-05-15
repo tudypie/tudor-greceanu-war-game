@@ -15,9 +15,9 @@ RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 10
   m_Fog: 1
-  m_FogColor: {r: 0, g: 0, b: 0, a: 1}
+  m_FogColor: {r: 0.01132071, g: 0.01132071, b: 0.01132071, a: 1}
   m_FogMode: 3
-  m_FogDensity: 0.002
+  m_FogDensity: 0.0007
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
   m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
@@ -200,11 +200,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlaneSpawner
   EnemyPrefab: {fileID: 6693517527467847154, guid: 513cf34042517124c8bd0cb5cd0b3974, type: 3}
   SpawnFaction: 1
-  TargetCount: 9
+  TargetCount: 8
   RespawnDelay: 0
   OneShot: 1
   MinRadius: 200
-  MaxRadius: 1000
+  MaxRadius: 1200
   MinAltitudeOffset: -300
   MaxAltitudeOffset: 90
   MinWorldY: 200
@@ -225,11 +225,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlaneSpawner
   EnemyPrefab: {fileID: 6693517527467847154, guid: c99d061dc179f8e46bc929d68d0c883e, type: 3}
   SpawnFaction: 2
-  TargetCount: 18
+  TargetCount: 14
   RespawnDelay: 0
   OneShot: 1
   MinRadius: 200
-  MaxRadius: 1000
+  MaxRadius: 1200
   MinAltitudeOffset: -300
   MaxAltitudeOffset: 90
   MinWorldY: 200
@@ -358,23 +358,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TerrainGenerator
   TargetTerrain: {fileID: 1113260349}
-  Seed: 12345
-  SizeX: 10000
-  SizeZ: 10000
-  HeightMetres: 600
-  Resolution: 2049
+  Seed: 84832
+  SizeX: 3000
+  SizeZ: 3000
+  HeightMetres: 900
+  Resolution: 4097
   BaseElevation: 60
-  ContinentalRelief: 120
-  ContinentalWavelength: 6000
+  ContinentalRelief: 420
+  ContinentalWavelength: 4200
   HillRelief: 220
-  HillWavelength: 900
+  HillWavelength: 600
   HillOctaves: 4
   HillLacunarity: 2
   HillGain: 0.5
   EnableCarpathians: 1
-  RidgeRelief: 350
-  RidgeWavelength: 1400
-  BandWidth: 2500
+  RidgeRelief: 550
+  RidgeWavelength: 1000
+  BandWidth: 2100
   ArcCurvature: 0.22
   WarpStrength: 140
   WarpWavelength: 1800
@@ -383,9 +383,20 @@ MonoBehaviour:
   RiverWidth: 220
   RiverMeander: 1200
   RiverMeanderWavelength: 4000
-  FlattenCentre: {x: 5000, y: 5000}
-  FlattenRadius: 700
-  FlattenBlend: 600
+  FlattenCentre: {x: 1500, y: 1500}
+  FlattenRadius: 0
+  FlattenBlend: 0
+  ApplyTexturing: 1
+  Resolution_Alphamap: 2048
+  GrassLayer: {fileID: 8574412962073106934, guid: f862b1383e7d1e747835de017328d247, type: 2}
+  RockLayer: {fileID: 8574412962073106934, guid: cd8ce7e73b1b630488487ba7915c6e02, type: 2}
+  SnowLayer: {fileID: 8574412962073106934, guid: 267198d360015b44c80dd20b0786726e, type: 2}
+  GrassRockAltitude: 170
+  GrassRockBlend: 60
+  RockSnowAltitude: 330
+  RockSnowBlend: 70
+  CliffAngle: 34
+  CliffBlend: 12
 --- !u!1001 &1354303056
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -398,17 +409,21 @@ PrefabInstance:
       propertyPath: m_Name
       value: PlayerPlane
       objectReference: {fileID: 0}
+    - target: {fileID: 2094005100673452570, guid: f25d9926d81e3b04b84ab35471d4f4a7, type: 3}
+      propertyPath: Stats
+      value: 
+      objectReference: {fileID: 11400000, guid: cbc290d575f6f5f4b9d594dbd8209620, type: 2}
     - target: {fileID: 9078488041855274334, guid: f25d9926d81e3b04b84ab35471d4f4a7, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: 399
       objectReference: {fileID: 0}
     - target: {fileID: 9078488041855274334, guid: f25d9926d81e3b04b84ab35471d4f4a7, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 148.56
+      value: 463.22
       objectReference: {fileID: 0}
     - target: {fileID: 9078488041855274334, guid: f25d9926d81e3b04b84ab35471d4f4a7, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: 396
       objectReference: {fileID: 0}
     - target: {fileID: 9078488041855274334, guid: f25d9926d81e3b04b84ab35471d4f4a7, type: 3}
       propertyPath: m_LocalRotation.w

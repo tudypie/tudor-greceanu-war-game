@@ -15,7 +15,9 @@ public class PlaneFlightModel : MonoBehaviour
     float _pitchRate;
     float _rollRate;
     float _yawRate;
+    float _throttle01;
     bool _stalling;
+    bool _overCeiling;
 
     public Transform CachedTransform => _transform;
     public Rigidbody Body => _rigidbody;
@@ -30,10 +32,31 @@ public class PlaneFlightModel : MonoBehaviour
     public bool IsStalling => _stalling;
 
     /// <summary>
+    /// True while above <see cref="PlaneFlightStats.ServiceCeiling"/>: the air
+    /// is too thin to climb, so pilot/AI pitch input is overridden and the nose
+    /// is forced down until the plane sinks back below the ceiling. Cleared
+    /// with hysteresis (<see cref="PlaneFlightStats.CeilingRecoverMargin"/>).
+    /// </summary>
+    public bool OverCeiling => _overCeiling;
+
+    /// <summary>
+    /// 0 below the warning band, ramps to 1 at the service ceiling, and stays
+    /// 1 while above it. Drives the player altitude-warning HUD.
+    /// </summary>
+    public float CeilingProximity { get; private set; }
+
+    /// <summary>
     /// Current airspeed in m/s along the flight path, after climb/dive drag
     /// is applied. Useful for HUD readouts and audio.
     /// </summary>
     public float CurrentSpeed { get; private set; }
+
+    /// <summary>
+    /// Throttle position: 0 at <see cref="PlaneFlightStats.NormalThrust"/>,
+    /// 1 at <see cref="PlaneFlightStats.MaxThrust"/>. Ramps linearly toward
+    /// the boost input rather than snapping. Useful for a throttle HUD.
+    /// </summary>
+    public float Throttle01 => _throttle01;
 
     void Start()
     {
@@ -52,8 +75,18 @@ public class PlaneFlightModel : MonoBehaviour
     void FixedUpdate()
     {
         if (Stats == null) return;
-        var agility = Boost ? Stats.ThrustAgilityMultiplier : 1f;
         var dt = Time.fixedDeltaTime;
+
+        // Hold the boost input to spool the throttle up toward MaxThrust;
+        // release it and it bleeds back down to NormalThrust. The linear
+        // ramp makes airspeed a dial the pilot can hold anywhere in between.
+        var throttleTarget = Boost ? 1f : 0f;
+        var throttleRate = Boost ? Stats.ThrottleAccelRate : Stats.ThrottleDecelRate;
+        _throttle01 = Mathf.MoveTowards(_throttle01, throttleTarget, throttleRate * dt);
+
+        // Boost agility scales with the throttle so handling firms up
+        // smoothly as it spools instead of snapping when the key goes down.
+        var agility = Mathf.Lerp(1f, Stats.ThrustAgilityMultiplier, _throttle01);
 
         var bank = _transform.right.y;
 
@@ -62,7 +95,7 @@ public class PlaneFlightModel : MonoBehaviour
 
         // Air drag: climbing bleeds airspeed, diving builds it back up.
         var speedMultiplier = 1f - climbFactor * Stats.DragMultiplier;
-        var baseThrust = Boost ? Stats.MaxThrust : Stats.NormalThrust;
+        var baseThrust = Mathf.Lerp(Stats.NormalThrust, Stats.MaxThrust, _throttle01);
         var speed = baseThrust * speedMultiplier;
         CurrentSpeed = speed;
 
@@ -77,11 +110,34 @@ public class PlaneFlightModel : MonoBehaviour
             _stalling = false;
         }
 
-        var targetPitchRate = _stalling
+        // Service ceiling with the same hysteresis pattern as the stall: above
+        // it the air is too thin to climb, so the nose is forced down until
+        // the plane sinks back CeilingRecoverMargin below the ceiling.
+        var altitude = _transform.position.y;
+        var warnBand = Mathf.Max(Stats.CeilingWarnBand, 0.0001f);
+        CeilingProximity = Mathf.Clamp01(
+            (altitude - (Stats.ServiceCeiling - warnBand)) / warnBand);
+        if (!_overCeiling)
+        {
+            if (altitude > Stats.ServiceCeiling) _overCeiling = true;
+        }
+        else if (altitude < Stats.ServiceCeiling - Stats.CeilingRecoverMargin)
+        {
+            _overCeiling = false;
+        }
+
+        float targetPitchRate;
+        if (_stalling)
             // Lost the wing: force the nose down to trade altitude for speed,
             // ignoring pilot pitch input until recovered.
-            ? Stats.StallNoseDownRate * agility
-            : (Stats.InvertPitch ? -PitchInput : PitchInput) * Stats.PitchIncreaseSpeed * agility;
+            targetPitchRate = Stats.StallNoseDownRate * agility;
+        else if (_overCeiling)
+            // Too high to sustain: the plane mushes over and the nose drops
+            // back toward thicker air, overriding pilot/AI pitch input.
+            targetPitchRate = Stats.CeilingNoseDownRate * agility;
+        else
+            targetPitchRate = (Stats.InvertPitch ? -PitchInput : PitchInput)
+                * Stats.PitchIncreaseSpeed * agility;
         var targetRollRate = Mathf.Approximately(RollInput, 0f)
             ? -bank * Stats.RollAutoLevelSpeed * agility
             : -RollInput * Stats.RollIncreaseSpeed * agility;

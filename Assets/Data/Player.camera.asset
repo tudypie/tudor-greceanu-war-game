@@ -13,9 +13,11 @@ MonoBehaviour:
   m_Name: Player.camera
   m_EditorClassIdentifier: 
   FollowOffset: {x: 0, y: 3, z: -8}
-  MouseSensitivity: {x: 0.2, y: 0.15}
+  MouseSensitivity: {x: 0.1, y: 0.1}
   InvertY: 0
   MinPitch: -40
   MaxPitch: 70
-  CameraSpring: 0.77
+  CameraSpring: 0.86
+  HeadingFollowSpring: 0.87
+  LookSpring: 0.82
   LockCursor: 1

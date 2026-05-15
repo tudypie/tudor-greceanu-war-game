@@ -15,38 +15,44 @@ MonoBehaviour:
   PitchGain: 2.5
   YawGain: 1.5
   RollGain: 3.5
-  CommitMin: 0.8
-  CommitMax: 1.5
-  EngagementRadius: 550
-  TargetSwitchHysteresis: 0.75
+  ReactionTime: 0.15
+  AcquireRange: 900
+  LoseRange: 1500
+  LoseTargetTime: 6
   TargetRefreshInterval: 0.5
-  LagSeconds: 0.35
+  TargetSwitchHysteresis: 0.75
+  LagSeconds: 0.08
+  SteerLeadTime: 0.5
   PatrolRadius: 350
   PatrolVerticalRange: 70
-  PatrolMinWorldY: 60
   PatrolWaypointReachDistance: 60
   PatrolWaypointTimeout: 12
-  ExtendMin: 2
-  ExtendMax: 4
+  EngageDurationMin: 9
+  EngageDurationMax: 16
+  BreakOffDurationMin: 2.5
+  BreakOffDurationMax: 4
+  BreakOffCooldown: 6
   ExtendDistance: 300
-  BadAspectDot: -0.2
-  RepositionDuration: 2.5
-  FireConeDeg: 8
-  FireRange: 350
+  MergeBreakDistance: 60
+  BadAspectDot: -0.3
+  FireConeDeg: 10
+  FireRange: 400
   FireMinDistance: 15
-  GunLockAcquireTime: 0.8
-  GunLockMaxCorrectionDeg: 5
-  GunAimNoiseDeg: 4
-  GunLeadTime: 0.15
-  BurstMin: 0.4
-  BurstMax: 0.8
-  CooldownMin: 0.6
-  CooldownMax: 1.2
-  ReactionTime: 0.15
+  GunLockAcquireTime: 0.15
+  GunLockMaxCorrectionDeg: 16
+  GunAimNoiseDeg: 3
+  GunLeadTime: 0.02
+  BurstMin: 0.5
+  BurstMax: 1
+  CooldownMin: 0.7
+  CooldownMax: 1.4
   AvoidanceRadius: 80
   AvoidanceAheadDot: 0.2
   AvoidanceStrength: 200
-  TerrainLookAhead: 220
-  TerrainSafetyRadius: 14
-  TerrainStrength: 750
-  AltitudeRecoverStrength: 200
+  PatrolMinWorldY: 30
+  TerrainClearance: 80
+  TerrainLookAheadTime: 3.5
+  TerrainProbeCount: 6
+  AltitudeRecoverStrength: 800
+  TerrainAvoidLateralStrength: 500
+  CeilingClearance: 120

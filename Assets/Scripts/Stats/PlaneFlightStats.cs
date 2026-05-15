@@ -13,6 +13,13 @@ public class PlaneFlightStats : ScriptableObject
     public float NormalThrust = 56f;
     public float MaxThrust = 66.7f;
     public float ThrustAgilityMultiplier = 1.8f;
+    // Holding the boost input spools the throttle linearly from NormalThrust
+    // up to MaxThrust; releasing it bleeds back down. Rates are in
+    // throttle-fraction per second, so 0.5 == 2 s to swing the full range.
+    // Spool-up is deliberately slower than spool-down so speed is a dial the
+    // pilot can hold partway, not an on/off switch.
+    public float ThrottleAccelRate = 0.5f;
+    public float ThrottleDecelRate = 0.7f;
 
     [Header("Pitch")]
     public float PitchIncreaseSpeed = 300f;
@@ -55,4 +62,22 @@ public class PlaneFlightStats : ScriptableObject
     public float StallNoseDownRate = 90f;
     // Stall clears once airspeed climbs back above StallSpeed * this factor.
     public float StallRecoverFactor = 1.2f;
+
+    [Header("Service Ceiling")]
+    // Absolute world-Y the airframe can't climb past: the air is too thin and
+    // the engine runs out of breath. Above it the plane "can't resist" — pilot
+    // (or AI) pitch input is ignored and the nose is forced down until it
+    // sinks back below the ceiling. Tallest terrain is ~600, so this sits well
+    // above the landscape; it only bites a sustained zoom-climb.
+    public float ServiceCeiling = 900f;
+    // Band (world units) below the ceiling where the player warning arms, so
+    // the pilot gets a heads-up before control is taken.
+    public float CeilingWarnBand = 200f;
+    // Forced nose-down pitch rate (deg/s) once above the ceiling. Mirrors
+    // StallNoseDownRate but a touch gentler — it's a high-altitude mush, not a
+    // violent low-speed stall.
+    public float CeilingNoseDownRate = 55f;
+    // Hysteresis: control only returns once back this far below the ceiling,
+    // so it doesn't flip-flop on the line.
+    public float CeilingRecoverMargin = 70f;
 }

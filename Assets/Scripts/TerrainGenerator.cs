@@ -18,10 +18,16 @@ using UnityEditor;
 // + domain warp        -> de-grids everything, cheap eroded look
 // - river valley        -> a meandering low-flight corridor / landmark
 // + flattened spawn pad -> keeps takeoff + the 200-500 m spawn shell clear
+//
+// Surface texturing is baked in the same pass: a splatmap blends grass ->
+// rock -> snow by world altitude, with steep faces forced toward rock so
+// cliffs never read as grass/snow. Missing layers are auto-generated as
+// solid-colour placeholder assets (swap their diffuse for real art later).
 [RequireComponent(typeof(Terrain))]
 public class TerrainGenerator : MonoBehaviour
 {
     public enum HeightmapRes { Res513 = 513, Res1025 = 1025, Res2049 = 2049, Res4097 = 4097 }
+    public enum AlphamapRes { Res256 = 256, Res512 = 512, Res1024 = 1024, Res2048 = 2048 }
 
     [Header("Target")]
     [Tooltip("Terrain to bake into. Auto-filled from this GameObject.")]
@@ -83,6 +89,27 @@ public class TerrainGenerator : MonoBehaviour
     public float FlattenRadius = 700f;
     [Tooltip("Smooth blend ring outside the flat radius (metres).")]
     public float FlattenBlend = 600f;
+
+    [Header("Surface Texturing (altitude + slope)")]
+    public bool ApplyTexturing = true;
+    [Tooltip("Splatmap grid resolution. 512 is plenty for band/slope blends seen from a plane.")]
+    public AlphamapRes Resolution_Alphamap = AlphamapRes.Res512;
+    [Tooltip("Low band. Auto-generated as a solid green placeholder if left empty.")]
+    public TerrainLayer GrassLayer;
+    [Tooltip("Mid band + all steep faces. Auto-generated as solid grey if empty.")]
+    public TerrainLayer RockLayer;
+    [Tooltip("High band. Auto-generated as solid white if empty.")]
+    public TerrainLayer SnowLayer;
+    [Tooltip("World altitude (m) of the grass->rock crossover; ± blend each side.")]
+    public float GrassRockAltitude = 170f;
+    public float GrassRockBlend = 60f;
+    [Tooltip("World altitude (m) of the rock->snow crossover; ± blend each side.")]
+    public float RockSnowAltitude = 330f;
+    public float RockSnowBlend = 70f;
+    [Tooltip("Slopes steeper than this (degrees) blend toward rock regardless of altitude.")]
+    [Range(0f, 90f)] public float CliffAngle = 34f;
+    [Tooltip("Soft range (degrees) over which the cliff->rock blend ramps in.")]
+    public float CliffBlend = 12f;
 
     // --- Generation ---------------------------------------------------------
 
@@ -156,7 +183,132 @@ public class TerrainGenerator : MonoBehaviour
         data.SetHeights(0, 0, heights);
         Debug.Log($"[TerrainGenerator] Baked {res}x{res} heightmap " +
                   $"({SizeX}x{SizeZ} m, seed {Seed}).", this);
+
+        if (ApplyTexturing) BakeSplatmap(data);
     }
+
+    // --- Surface texturing --------------------------------------------------
+
+    // Blend grass -> rock -> snow by altitude, then pull steep faces toward
+    // rock. Reads the *baked* terrain back via GetInterpolatedHeight /
+    // GetSteepness so the splat tracks the real surface (incl. warp, river,
+    // flatten pad) at the alphamap's own resolution.
+    void BakeSplatmap(TerrainData data)
+    {
+        var layers = ResolveLayers();
+        if (layers == null) return;          // missing layers, warning already logged
+        data.terrainLayers = layers;
+
+        int ar = (int)Resolution_Alphamap;
+        data.alphamapResolution = ar;
+        var maps = new float[ar, ar, 3];
+
+        for (int y = 0; y < ar; y++)
+        {
+            float v = y / (float)(ar - 1);   // normalised Z (terrain length)
+            for (int x = 0; x < ar; x++)
+            {
+                float u = x / (float)(ar - 1);          // normalised X (width)
+                float alt = data.GetInterpolatedHeight(u, v);   // metres
+                float steep = data.GetSteepness(u, v);          // degrees
+
+                // Altitude bands with smooth crossfades.
+                float s1 = SStep(GrassRockAltitude - GrassRockBlend,
+                                 GrassRockAltitude + GrassRockBlend, alt);
+                float s2 = SStep(RockSnowAltitude - RockSnowBlend,
+                                 RockSnowAltitude + RockSnowBlend, alt);
+                float wGrass = 1f - s1;
+                float wRock = Mathf.Clamp01(s1 - s2);
+                float wSnow = s2;
+
+                // Steep faces -> rock, fading in across CliffBlend degrees.
+                float cf = SStep(CliffAngle, CliffAngle + CliffBlend, steep);
+                wGrass = Mathf.Lerp(wGrass, 0f, cf);
+                wRock = Mathf.Lerp(wRock, 1f, cf);
+                wSnow = Mathf.Lerp(wSnow, 0f, cf);
+
+                float sum = wGrass + wRock + wSnow;
+                if (sum < 1e-5f) { wRock = 1f; sum = 1f; }
+                maps[y, x, 0] = wGrass / sum;
+                maps[y, x, 1] = wRock / sum;
+                maps[y, x, 2] = wSnow / sum;
+            }
+        }
+
+        data.SetAlphamaps(0, 0, maps);
+        Debug.Log($"[TerrainGenerator] Baked {ar}x{ar} splatmap " +
+                  $"(grass<{GrassRockAltitude}m, snow>{RockSnowAltitude}m, " +
+                  $"cliff>{CliffAngle}°).", this);
+    }
+
+    // Smoothstep over [a, b] -> 0..1 (handles a == b without dividing by zero).
+    static float SStep(float a, float b, float x) =>
+        Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(a, b, x));
+
+    // Returns the 3 layers in [grass, rock, snow] order. In the editor any
+    // unassigned slot is created as a committed solid-colour placeholder
+    // asset; at runtime it falls back to a transient in-memory layer.
+    TerrainLayer[] ResolveLayers()
+    {
+#if UNITY_EDITOR
+        const string root = "Assets/Data";
+        const string dir = root + "/Terrain";
+        if (!UnityEditor.AssetDatabase.IsValidFolder(dir))
+        {
+            if (!UnityEditor.AssetDatabase.IsValidFolder(root))
+                UnityEditor.AssetDatabase.CreateFolder("Assets", "Data");
+            UnityEditor.AssetDatabase.CreateFolder(root, "Terrain");
+        }
+        if (GrassLayer == null) GrassLayer = MakeLayerAsset(dir, "Terrain.Grass", new Color(0.36f, 0.52f, 0.22f));
+        if (RockLayer == null) RockLayer = MakeLayerAsset(dir, "Terrain.Rock", new Color(0.45f, 0.42f, 0.38f));
+        if (SnowLayer == null) SnowLayer = MakeLayerAsset(dir, "Terrain.Snow", new Color(0.92f, 0.93f, 0.96f));
+#else
+        if (GrassLayer == null) GrassLayer = MakeLayerTransient(new Color(0.36f, 0.52f, 0.22f));
+        if (RockLayer == null) RockLayer = MakeLayerTransient(new Color(0.45f, 0.42f, 0.38f));
+        if (SnowLayer == null) SnowLayer = MakeLayerTransient(new Color(0.92f, 0.93f, 0.96f));
+#endif
+        if (GrassLayer == null || RockLayer == null || SnowLayer == null)
+        {
+            Debug.LogWarning("[TerrainGenerator] Texturing skipped: assign Grass/Rock/Snow layers.", this);
+            return null;
+        }
+        return new[] { GrassLayer, RockLayer, SnowLayer };
+    }
+
+    static Texture2D SolidTex(Color c)
+    {
+        var t = new Texture2D(8, 8, TextureFormat.RGB24, false);
+        var px = new Color[64];
+        for (int i = 0; i < px.Length; i++) px[i] = c;
+        t.SetPixels(px);
+        t.Apply();
+        return t;
+    }
+
+    TerrainLayer MakeLayerTransient(Color c) =>
+        new() { diffuseTexture = SolidTex(c), tileSize = new Vector2(60f, 60f) };
+
+#if UNITY_EDITOR
+    // Creates (or reuses) a committed .terrainlayer + solid .png so the bake
+    // is self-contained and version-controlled, like the cooked heightmap.
+    TerrainLayer MakeLayerAsset(string dir, string name, Color c)
+    {
+        string layerPath = $"{dir}/{name}.terrainlayer";
+        var existing = UnityEditor.AssetDatabase.LoadAssetAtPath<TerrainLayer>(layerPath);
+        if (existing != null) return existing;
+
+        string texPath = $"{dir}/{name}.png";
+        var tex = SolidTex(c);
+        System.IO.File.WriteAllBytes(texPath, tex.EncodeToPNG());
+        DestroyImmediate(tex);
+        UnityEditor.AssetDatabase.ImportAsset(texPath);
+        var diffuse = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+
+        var layer = new TerrainLayer { diffuseTexture = diffuse, tileSize = new Vector2(60f, 60f) };
+        UnityEditor.AssetDatabase.CreateAsset(layer, layerPath);
+        return layer;
+    }
+#endif
 
 #if UNITY_EDITOR
     // Generate, then persist the modified TerrainData asset to disk so the
@@ -166,6 +318,7 @@ public class TerrainGenerator : MonoBehaviour
         Generate();
         if (TargetTerrain == null || TargetTerrain.terrainData == null) return;
         EditorUtility.SetDirty(TargetTerrain.terrainData);
+        EditorUtility.SetDirty(this);   // keep auto-assigned layer refs
         AssetDatabase.SaveAssets();
         Debug.Log("[TerrainGenerator] TerrainData asset saved.", this);
     }

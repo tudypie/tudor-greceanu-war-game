@@ -19,7 +19,7 @@ MonoBehaviour:
   CrosshairSize: 18
   LineThickness: 2
   ReferenceHeight: 1080
-  MaxLockDistance: 250
+  MaxLockDistance: 450
   AcquireTime: 0.25
   LoseGrace: 0.35
   BoxColor: {r: 1, g: 1, b: 1, a: 0.35}
