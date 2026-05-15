@@ -28,6 +28,7 @@ public class PlaneSpawner : MonoBehaviour
     public float MinWorldY = 0f;
 
     [Header("Out-Of-Sight")]
+    public bool spawnOutOfSight = false;
     public int MaxPlacementAttempts = 16;
     public float OffscreenMargin = 80f;
 
@@ -89,7 +90,7 @@ public class PlaneSpawner : MonoBehaviour
         }
         if (candidate.y < MinWorldY) candidate.y = MinWorldY;
 
-        if (_camera == null)
+        if (!spawnOutOfSight || _camera == null)
         {
             pos = candidate;
             return true;

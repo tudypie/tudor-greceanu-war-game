@@ -11,15 +11,15 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0007, type: 3}
   m_Name: Player.lockon
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: 
   BoxWidth: 180
   BoxHeight: 140
-  CrosshairRange: 300
+  CrosshairRange: 100
   CrosshairSmoothing: 12
   CrosshairSize: 18
   LineThickness: 2
   ReferenceHeight: 1080
-  MaxLockDistance: 100
+  MaxLockDistance: 250
   AcquireTime: 0.25
   LoseGrace: 0.35
   BoxColor: {r: 1, g: 1, b: 1, a: 0.35}

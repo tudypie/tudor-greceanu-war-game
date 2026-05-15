@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0002, type: 3}
   m_Name: Default.weapon
   m_EditorClassIdentifier: 
-  Range: 300
+  Range: 1000
   FireInterval: 0.08
-  MuzzleOffsetZ: 4
+  MuzzleOffsetZ: 1.333
   Damage: 8
   HitMask:
     serializedVersion: 2
@@ -26,4 +26,4 @@ MonoBehaviour:
   ResumeHeatFraction: 0
   TracerDuration: 0.04
   TracerColor: {r: 1, g: 0.85, b: 0.3, a: 1}
-  TracerWidth: 0.12
+  TracerWidth: 0.04

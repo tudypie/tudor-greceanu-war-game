@@ -11,17 +11,17 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a1b2c3d4e5f6789012345678901a0008, type: 3}
   m_Name: Player.minimap
-  m_EditorClassIdentifier:
-  MapRadius: 500
+  m_EditorClassIdentifier: 
+  MapRadius: 3000
   MinimapSize: 180
   Margin: 20
-  FireRangeReference: 350
+  FireRangeReference: 116.7
   EnemyDotSize: 4
   LockedDotSize: 6
   PlayerMarkerSize: 14
   EnemyArrowSize: 9
   LockedArrowSize: 12
-  AltitudeThreshold: 15
+  AltitudeThreshold: 5
   EnemyColor: {r: 1, g: 0.2, b: 0.2, a: 1}
   AllyColor: {r: 0.3, g: 0.85, b: 1, a: 1}
   LockedColor: {r: 1, g: 0.85, b: 0.2, a: 1}

@@ -32,6 +32,12 @@ public class PlaneAIController : MonoBehaviour
     float _extendUntil;
     float _nextExtendAllowed;
 
+    float _gunLockTime;
+    float _aimNoiseSeed;
+    const float GunNoiseFrequency = 1.7f;
+
+    bool _floorRecovering;
+
     const int LagBufferSize = 32;
     readonly Vector3[] _lagPositions = new Vector3[LagBufferSize];
     readonly float[] _lagTimes = new float[LagBufferSize];
@@ -46,6 +52,7 @@ public class PlaneAIController : MonoBehaviour
         _shooter = GetComponent<PlaneShooter>();
         _health = GetComponent<PlaneHealth>();
         _anchor = _transform.position;
+        _aimNoiseSeed = Random.value * 1000f;
         if (Stats == null)
         {
             Debug.LogError($"{nameof(PlaneAIController)} on {name} has no Stats assigned.", this);
@@ -72,10 +79,15 @@ public class PlaneAIController : MonoBehaviour
         if (Time.fixedTime >= _commitUntil)
         {
             _committedAimPoint = ResolveAimPoint();
+            // Never commit to a point below the altitude floor, even when
+            // chasing a target that dives for the deck.
+            if (_committedAimPoint.y < Stats.PatrolMinWorldY)
+                _committedAimPoint.y = Stats.PatrolMinWorldY;
             _commitUntil = Time.fixedTime + Random.Range(Stats.CommitMin, Stats.CommitMax);
         }
 
-        var aimPoint = _committedAimPoint + ComputeAvoidance() + ComputeTerrainAvoidance();
+        var aimPoint = _committedAimPoint + ComputeAvoidance()
+            + ComputeTerrainAvoidance() + ComputeAltitudeFloor();
         var toAim = aimPoint - _transform.position;
         var aimDistance = toAim.magnitude;
         if (aimDistance < 0.0001f) return;
@@ -101,7 +113,39 @@ public class PlaneAIController : MonoBehaviour
 
         _model.Boost = false;
 
-        UpdateFiring(dirLocal);
+        // Hard global altitude floor. Below PatrolMinWorldY the AI abandons
+        // whatever it was doing — target, avoidance, aim — and climbs out:
+        // wings level, full nose-up, guns cold. No matter what. Hysteresis
+        // (must climb a margin back above the floor) stops boundary chatter.
+        var floor = Stats.PatrolMinWorldY;
+        var y = _transform.position.y;
+        if (_floorRecovering)
+        {
+            if (y >= floor + Mathf.Max(floor * 0.25f, 5f)) _floorRecovering = false;
+        }
+        else if (y < floor)
+        {
+            _floorRecovering = true;
+        }
+
+        if (_floorRecovering)
+        {
+            var climbPitch = _model.InvertPitch ? 1f : -1f;
+            _smoothPitch = climbPitch;
+            _smoothRoll = 0f;
+            _smoothYaw = 0f;
+            _model.PitchInput = climbPitch;
+            _model.RollInput = 0f;   // 0 lets the flight model auto-level the wings
+            _model.YawInput = 0f;
+            if (_shooter != null)
+            {
+                _shooter.UseAimDirection = false;
+                _shooter.Trigger = false;
+            }
+            return;
+        }
+
+        UpdateFiring();
     }
 
     Vector3 ComputeTerrainAvoidance()
@@ -124,6 +168,25 @@ public class PlaneAIController : MonoBehaviour
         var t = 1f - hit.distance / Stats.TerrainLookAhead;
         var weight = t * t;
         return avoidDir * Stats.TerrainStrength * weight;
+    }
+
+    // Hard altitude floor: as the plane nears (and especially drops below)
+    // PatrolMinWorldY, push the aim point sharply upward so the AI climbs
+    // away from the ground instead of chasing a target into it. Independent
+    // of the forward terrain spherecast, which can miss a shallow descent
+    // toward flat ground.
+    Vector3 ComputeAltitudeFloor()
+    {
+        if (Stats.AltitudeRecoverStrength <= 0f) return Vector3.zero;
+
+        var floor = Stats.PatrolMinWorldY;
+        var band = Mathf.Max(floor * 0.5f, 1f);
+        var y = _transform.position.y;
+        if (y >= floor + band) return Vector3.zero;
+
+        // 0 at the top of the soft band, 1 at the floor and below.
+        var depth = Mathf.Clamp01((floor + band - y) / band);
+        return Vector3.up * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
     Vector3 ComputeAvoidance()
@@ -248,21 +311,97 @@ public class PlaneAIController : MonoBehaviour
         _commitUntil = 0f;
     }
 
-    void UpdateFiring(Vector3 dirLocal)
+    // AI gunnery: a deliberately weaker analogue of the player's lock-on.
+    // Flight steering still uses lag pursuit (beatable); only the *gun*
+    // aim gets an assist, gated by a soft lock and degraded by a hard
+    // correction cap plus range/aspect-scaled aim noise.
+    void UpdateFiring()
     {
         if (_shooter == null) return;
 
         var wantsFire = false;
+
         if (_state == AIState.Chasing && _target != null)
         {
-            var liveDistance = Vector3.Distance(_target.transform.position, _transform.position);
+            var targetPos = _target.transform.position;
+            var toTarget = targetPos - _transform.position;
+            var dist = toTarget.magnitude;
+            var inRange = dist < Stats.FireRange && dist > Stats.FireMinDistance;
             var coneCos = Mathf.Cos(Stats.FireConeDeg * Mathf.Deg2Rad);
-            var aligned = dirLocal.z > coneCos;
-            var inRange = liveDistance < Stats.FireRange && liveDistance > Stats.FireMinDistance;
-            wantsFire = aligned && inRange;
+
+            if (dist > 0.0001f && inRange)
+            {
+                var trueDir = toTarget / dist;
+                var noseDot = Vector3.Dot(_transform.forward, trueDir);
+
+                // Build the soft lock while the target sits ahead; it
+                // collapses the instant it leaves the cone (the player's
+                // lock gets a grace period — the AI's does not).
+                if (noseDot > coneCos)
+                    _gunLockTime += Time.fixedDeltaTime;
+                else
+                    _gunLockTime = 0f;
+
+                if (_gunLockTime >= Stats.GunLockAcquireTime)
+                {
+                    // Lead the target's CURRENT position, not the lagged
+                    // pursuit point the flight path tracks.
+                    var lead = targetPos + EstimateTargetVelocity() * Stats.GunLeadTime;
+                    var desired = (lead - _transform.position).normalized;
+
+                    // Correction cap: the solution may only bend so far off
+                    // the nose, so a hard-jinking target outruns it and the
+                    // AI must keep flying for position.
+                    var maxRad = Stats.GunLockMaxCorrectionDeg * Mathf.Deg2Rad;
+                    var aim = Vector3.RotateTowards(_transform.forward, desired, maxRad, 0f);
+
+                    // Aim noise grows with range and off-tail aspect, so only
+                    // close, saddled shots are accurate.
+                    var rangeFrac = Mathf.Clamp01(dist / Mathf.Max(Stats.FireRange, 0.0001f));
+                    var aspectErr = 1f - Mathf.Clamp01(noseDot);
+                    var noiseDeg = Stats.GunAimNoiseDeg * (0.4f + 0.6f * rangeFrac) * (1f + aspectErr);
+
+                    var nt = Time.time * GunNoiseFrequency;
+                    var yaw = (Mathf.PerlinNoise(_aimNoiseSeed, nt) - 0.5f) * 2f * noiseDeg;
+                    var pitch = (Mathf.PerlinNoise(nt, _aimNoiseSeed + 31.7f) - 0.5f) * 2f * noiseDeg;
+                    aim = Quaternion.AngleAxis(yaw, _transform.up)
+                        * Quaternion.AngleAxis(pitch, _transform.right) * aim;
+
+                    _shooter.UseAimDirection = true;
+                    _shooter.AimDirection = aim;
+
+                    // Fire only if the capped+noised solution still points at
+                    // the target — a jinker that beats the cap stays safe.
+                    wantsFire = Vector3.Dot(aim.normalized, trueDir) > coneCos;
+                }
+                else
+                {
+                    _shooter.UseAimDirection = false;
+                }
+            }
+            else
+            {
+                _gunLockTime = 0f;
+                _shooter.UseAimDirection = false;
+            }
+        }
+        else
+        {
+            _gunLockTime = 0f;
+            _shooter.UseAimDirection = false;
         }
 
         _shooter.Trigger = ResolveBurstTrigger(wantsFire);
+    }
+
+    Vector3 EstimateTargetVelocity()
+    {
+        if (_lagCount < 2) return Vector3.zero;
+        var i0 = (_lagHead - 1 + LagBufferSize) % LagBufferSize;
+        var i1 = (_lagHead - 2 + LagBufferSize) % LagBufferSize;
+        var dt = _lagTimes[i0] - _lagTimes[i1];
+        if (dt <= 0.0001f) return Vector3.zero;
+        return (_lagPositions[i0] - _lagPositions[i1]) / dt;
     }
 
     bool IsTargetEngageable(PlaneHealth t)
@@ -327,6 +466,7 @@ public class PlaneAIController : MonoBehaviour
         _lagSampledTarget = t;
         _lagHead = 0;
         _lagCount = 0;
+        _gunLockTime = 0f;
     }
 
     void SampleTargetForLag()

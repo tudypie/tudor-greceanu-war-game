@@ -24,6 +24,7 @@ public class PlaneAIStats : ScriptableObject
     [Header("Patrol")]
     public float PatrolRadius = 350f;
     public float PatrolVerticalRange = 60f;
+    [Tooltip("Hard minimum world Y for ALL AI aim points — patrol, extend, AND chasing. The altitude floor.")]
     public float PatrolMinWorldY = 30f;
     public float PatrolWaypointReachDistance = 70f;
     public float PatrolWaypointTimeout = 12f;
@@ -41,6 +42,16 @@ public class PlaneAIStats : ScriptableObject
     public float FireConeDeg = 5f;
     public float FireRange = 280f;
     public float FireMinDistance = 12f;
+
+    [Header("Gunnery (AI Lock — kept weaker than the player)")]
+    [Tooltip("Seconds the target must stay within FireConeDeg before the gun aim-assist engages.")]
+    public float GunLockAcquireTime = 0.8f;
+    [Tooltip("Max degrees the assisted gun solution may bend off the nose. Smaller = AI must point closer; hard jinkers beat it.")]
+    public float GunLockMaxCorrectionDeg = 5f;
+    [Tooltip("Base aim error in degrees; scaled up with range and off-tail aspect so only close, saddled shots land.")]
+    public float GunAimNoiseDeg = 4f;
+    [Tooltip("Seconds of target-velocity lead baked into the gun solution.")]
+    public float GunLeadTime = 0.15f;
 
     [Header("Burst Fire")]
     public float BurstMin = 0.3f;
@@ -65,4 +76,8 @@ public class PlaneAIStats : ScriptableObject
     public float TerrainSafetyRadius = 14f;
     [Tooltip("World units of bias applied when an obstacle is right in front.")]
     public float TerrainStrength = 600f;
+
+    [Header("Altitude Floor")]
+    [Tooltip("Upward aim bias (world units) applied as the plane nears/drops below PatrolMinWorldY. Keeps AI from chasing into the ground; 0 disables.")]
+    public float AltitudeRecoverStrength = 800f;
 }
