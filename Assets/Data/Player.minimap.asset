@@ -27,6 +27,10 @@ MonoBehaviour:
   LockedColor: {r: 1, g: 0.85, b: 0.2, a: 1}
   PlayerColor: {r: 0.3, g: 1, b: 0.4, a: 1}
   RingColor: {r: 1, g: 0.3, b: 0.3, a: 0.25}
+  ShowCardinals: 1
+  CardinalColor: {r: 1, g: 1, b: 1, a: 0.7}
+  CardinalFontSize: 11
+  CardinalInset: 9
   SweepPeriod: 3
   PingFadeDuration: 2
   ShowSweepLine: 1

@@ -13,6 +13,7 @@ public class PlaneMinimapHud : MonoBehaviour
     Texture2D _triangleTex;
     Texture2D _upArrowTex;
     Texture2D _downArrowTex;
+    GUIStyle _cardinalStyle;
     readonly List<PlaneHealth> _hostiles = new List<PlaneHealth>();
     readonly List<PlaneHealth> _allies = new List<PlaneHealth>();
     float _nextRefresh;
@@ -71,6 +72,27 @@ public class PlaneMinimapHud : MonoBehaviour
         float yaw = Mathf.Atan2(f.x, f.z);
         float cosY = Mathf.Cos(yaw);
         float sinY = Mathf.Sin(yaw);
+
+        if (Stats.ShowCardinals)
+        {
+            if (_cardinalStyle == null)
+                _cardinalStyle = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontStyle = FontStyle.Bold
+                };
+            _cardinalStyle.fontSize = Stats.CardinalFontSize;
+            _cardinalStyle.normal.textColor = Stats.CardinalColor;
+
+            float cardRadius = halfPx - Stats.CardinalInset;
+            prev = GUI.color;
+            GUI.color = Color.white;
+            DrawCardinal("N", 0f, 1f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("E", 1f, 0f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("S", 0f, -1f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("W", -1f, 0f, cosY, sinY, cx, cy, cardRadius);
+            GUI.color = prev;
+        }
 
         Vector3 origin = transform.position;
         Transform locked = _lockOn != null ? _lockOn.LockedTarget : null;
@@ -146,6 +168,16 @@ public class PlaneMinimapHud : MonoBehaviour
         var pRect = new Rect(cx - Stats.PlayerMarkerSize * 0.5f, cy - Stats.PlayerMarkerSize * 0.5f, Stats.PlayerMarkerSize, Stats.PlayerMarkerSize);
         GUI.DrawTexture(pRect, _triangleTex);
         GUI.color = prev;
+    }
+
+    void DrawCardinal(string label, float wx, float wz, float cosY, float sinY,
+                      float cx, float cy, float radius)
+    {
+        float lx = wx * cosY - wz * sinY;
+        float ly = wx * sinY + wz * cosY;
+        float sx = cx + lx * radius;
+        float sy = cy - ly * radius;
+        GUI.Label(new Rect(sx - 10f, sy - 10f, 20f, 20f), label, _cardinalStyle);
     }
 
     static void DrawIcon(Vector2 center, float size, Texture2D tex)

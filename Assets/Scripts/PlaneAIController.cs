@@ -167,6 +167,17 @@ public class PlaneAIController : MonoBehaviour
             aimPoint += ComputeCeilingSoftBias(ceilingCap);
         }
 
+        // Map boundary (horizontal mirror of the ceiling): keep the aim point
+        // inside the scene's MapBoundary box (minus BoundaryClearance) and add
+        // an inward bias as we near the edge, so the AI comes about on its own
+        // instead of grinding against the flight model's hard turn-back.
+        var boundary = MapBoundary.Instance;
+        if (boundary != null)
+        {
+            aimPoint = boundary.ClampInsideXZ(aimPoint, Stats.BoundaryClearance);
+            aimPoint += ComputeBoundarySoftBias(boundary);
+        }
+
         // GCAS overlay: blend the whole aim toward the recoverable climb-out
         // point as the threat rises (replaces the additive soft bias).
         if (w > 0f) aimPoint = Vector3.Lerp(aimPoint, _gcaClimbOutPoint, w);
@@ -353,6 +364,28 @@ public class PlaneAIController : MonoBehaviour
         if (y <= cap - band) return Vector3.zero;
         var depth = Mathf.Clamp01((y - (cap - band)) / band);
         return Vector3.down * Stats.AltitudeRecoverStrength * (depth * depth);
+    }
+
+    // --- Map boundary (horizontal mirror of the ceiling) -------------------
+
+    // Mirror of ComputeCeilingSoftBias on the horizontal plane: as the plane
+    // pushes past the soft edge (the MapBoundary box shrunk by
+    // BoundaryClearance) an inward bias ramps in over the BoundaryClearance-
+    // wide band out to the hard edge, so it banks back on its own before the
+    // flight model has to force it.
+    Vector3 ComputeBoundarySoftBias(MapBoundary boundary)
+    {
+        if (Stats.AltitudeRecoverStrength <= 0f) return Vector3.zero;
+        var inset = Stats.BoundaryClearance;
+        var band = Mathf.Max(inset, 1f);
+        var pos = _transform.position;
+        var d = boundary.OutsideDistanceXZ(pos, inset);
+        if (d < 0.0001f) return Vector3.zero;
+        var depth = Mathf.Clamp01(d / band);
+        var inward = boundary.ClampInsideXZ(pos, inset) - pos;
+        inward.y = 0f;
+        if (inward.sqrMagnitude < 0.0001f) return Vector3.zero;
+        return inward.normalized * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
     // --- Predictive ground-collision avoidance (GCAS) ----------------------
@@ -984,6 +1017,12 @@ public class PlaneAIController : MonoBehaviour
         var horiz = Random.insideUnitCircle * Stats.PatrolRadius;
         var dy = Random.Range(-Stats.PatrolVerticalRange, Stats.PatrolVerticalRange);
         _patrolWaypoint = _anchor + new Vector3(horiz.x, dy, horiz.y);
+        // Pull the waypoint inside the map first (before the floor clamp, so
+        // the route is sampled at the corrected XZ) — otherwise a spawn anchor
+        // near the edge throws patrol legs into the hard turn-back.
+        var boundary = MapBoundary.Instance;
+        if (boundary != null)
+            _patrolWaypoint = boundary.ClampInsideXZ(_patrolWaypoint, Stats.BoundaryClearance);
         // Lift above the worst floor along the WHOLE route, not just the
         // endpoint, so the straight leg doesn't fly through a hill.
         var floor = WorstFloorAlong(_transform.position, _patrolWaypoint,

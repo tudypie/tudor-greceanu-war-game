@@ -21,6 +21,15 @@ public class PlaneFlightStats : ScriptableObject
     public float ThrottleAccelRate = 0.5f;
     public float ThrottleDecelRate = 0.7f;
 
+    [Header("World Scale")]
+    // Multiply a scaled m/s figure (CurrentSpeed, thrust) by this to recover
+    // real-world m/s. The world runs at s = 1/3 scale for speeds, so the
+    // inverse is 3. This is the single source of truth for the ratio: HUD and
+    // audio read it instead of hardcoding a magic number, so re-scaling the
+    // whole sim is a one-field change. Pure display/feel — no physics reads it.
+    [Tooltip("Scaled m/s -> real m/s. World speed scale is 1/3, so 3.")]
+    public float RealSpeedScale = 3f;
+
     [Header("Pitch")]
     public float PitchIncreaseSpeed = 300f;
     public bool InvertPitch = true;
@@ -84,4 +93,7 @@ public class PlaneFlightStats : ScriptableObject
     // (degrees) below horizontal, so it mushes over into a descent instead of
     // tucking into a near-vertical dive. 60 == nose 60 deg down, not 90.
     public float CeilingMaxDiveAngle = 60f;
+
+    // The horizontal limit (the map boundary, the ceiling's twin) is NOT here:
+    // it is a scene-placed box you size in the editor — see MapBoundary.
 }

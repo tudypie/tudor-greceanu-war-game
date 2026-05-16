@@ -112,6 +112,10 @@ public class PlaneAIStats : ScriptableObject
     [Tooltip("How far below the flight model's ServiceCeiling the AI keeps. It clamps its aim point to (ServiceCeiling - this) and adds a soft DOWNWARD bias within this band (reusing AltitudeRecoverStrength), so it levels off instead of porpoising where the flight model would force its nose down anyway. Keep it comfortably larger than the flight CeilingRecoverMargin.")]
     public float CeilingClearance = 120f;
 
+    [Header("Map Boundary (horizontal mirror of the ceiling)")]
+    [Tooltip("How far inside the scene's MapBoundary box the AI keeps. It clamps its aim point (and patrol waypoints) to the box shrunk by this, and adds a soft INWARD bias over this band out to the hard edge (reusing AltitudeRecoverStrength), so it turns back on its own instead of grinding against the flight model's hard turn-back. Keep it comfortably larger than the MapBoundary RecoverMargin.")]
+    public float BoundaryClearance = 250f;
+
     [Header("Predictive Ground-Collision Avoidance (GCAS)")]
     [Tooltip("Master switch. When off, the AI falls back to the legacy soft altitude bias (Layer 1 floor clamp + Layer 3 hard pull-up still protect it).")]
     public bool GcaEnabled = true;

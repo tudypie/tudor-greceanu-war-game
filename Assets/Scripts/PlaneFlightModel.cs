@@ -18,6 +18,7 @@ public class PlaneFlightModel : MonoBehaviour
     float _throttle01;
     bool _stalling;
     bool _overCeiling;
+    bool _overBoundary;
 
     public Transform CachedTransform => _transform;
     public Rigidbody Body => _rigidbody;
@@ -44,6 +45,20 @@ public class PlaneFlightModel : MonoBehaviour
     /// 1 while above it. Drives the player altitude-warning HUD.
     /// </summary>
     public float CeilingProximity { get; private set; }
+
+    /// <summary>
+    /// True while outside the scene's <see cref="MapBoundary"/> box: pilot/AI
+    /// roll &amp; yaw are overridden and the plane banks back toward the centre
+    /// until it is back inside. Cleared with hysteresis
+    /// (<see cref="MapBoundary.RecoverMargin"/>).
+    /// </summary>
+    public bool OverBoundary => _overBoundary;
+
+    /// <summary>
+    /// 0 inside the warning band, ramps to 1 at the map boundary edge, and
+    /// stays 1 while outside it. Drives the player boundary-warning HUD.
+    /// </summary>
+    public float BoundaryProximity { get; private set; }
 
     /// <summary>
     /// Current airspeed in m/s along the flight path, after climb/dive drag
@@ -126,6 +141,31 @@ public class PlaneFlightModel : MonoBehaviour
             _overCeiling = false;
         }
 
+        // Map boundary: the horizontal mirror of the ceiling, but the limit is
+        // the scene's MapBoundary box rather than an altitude. Same warn-band
+        // ramp + hysteresis, measured as the signed distance to the box edge.
+        // No MapBoundary in the scene -> the whole feature is inert.
+        var boundary = MapBoundary.Instance;
+        if (boundary == null)
+        {
+            BoundaryProximity = 0f;
+            _overBoundary = false;
+        }
+        else
+        {
+            var edge = boundary.SignedEdgeDistanceXZ(_transform.position);
+            var boundaryWarn = Mathf.Max(boundary.WarnBand, 0.0001f);
+            BoundaryProximity = Mathf.Clamp01(1f + edge / boundaryWarn);
+            if (!_overBoundary)
+            {
+                if (edge > 0f) _overBoundary = true;
+            }
+            else if (edge < -boundary.RecoverMargin)
+            {
+                _overBoundary = false;
+            }
+        }
+
         float targetPitchRate;
         if (_stalling)
             // Lost the wing: force the nose down to trade altitude for speed,
@@ -150,6 +190,28 @@ public class PlaneFlightModel : MonoBehaviour
             ? -bank * Stats.RollAutoLevelSpeed * agility
             : -RollInput * Stats.RollIncreaseSpeed * agility;
         var targetYawRate = (YawInput * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
+
+        // Outside the map: override pilot/AI roll & yaw and bank back toward
+        // the field centre (pitch is left to the stall/ceiling/terrain logic).
+        // Same input->rate mapping as a real stick deflection, with the
+        // command synthesised from the bearing error so it whips around while
+        // the nose points outward and rolls out level as it comes back in.
+        if (_overBoundary && boundary != null)
+        {
+            var toCenter = boundary.Center - _transform.position;
+            toCenter.y = 0f;
+            if (toCenter.sqrMagnitude > 0.0001f)
+            {
+                var dirLocal = _transform.InverseTransformDirection(toCenter.normalized);
+                // dirLocal.x > 0: centre is off our right; dirLocal.z > 0: it
+                // is ahead (the AI's own steering sign convention).
+                var turnDir = dirLocal.x >= 0f ? 1f : -1f;
+                var need = 1f - Mathf.Clamp01(dirLocal.z);
+                var turn = Mathf.Clamp(turnDir * need * boundary.TurnGain, -1f, 1f);
+                targetRollRate = -turn * Stats.RollIncreaseSpeed * agility;
+                targetYawRate = (turn * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
+            }
+        }
 
         var alphaPitch = 1f - Mathf.Exp(-dt / Mathf.Max(Stats.PitchResponseTime, 0.0001f));
         var alphaRoll = 1f - Mathf.Exp(-dt / Mathf.Max(Stats.RollResponseTime, 0.0001f));

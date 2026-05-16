@@ -25,6 +25,13 @@ public class PlaneMinimapStats : ScriptableObject
     public Color PlayerColor = new Color(0.3f, 1f, 0.4f, 1f);
     public Color RingColor = new Color(1f, 0.3f, 0.3f, 0.25f);
 
+    [Header("Cardinal Directions")]
+    public bool ShowCardinals = true;
+    public Color CardinalColor = new Color(1f, 1f, 1f, 0.7f);
+    public int CardinalFontSize = 11;
+    [Tooltip("Pixels the N/E/S/W labels sit inside the minimap edge.")]
+    public float CardinalInset = 9f;
+
     [Header("Radar Sweep")]
     [Tooltip("Seconds for the sweep to complete one full rotation.")]
     public float SweepPeriod = 3f;
