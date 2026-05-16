@@ -79,9 +79,27 @@ public class TerrainGenerator : MonoBehaviour
     public bool EnableRiver = true;
     public float RiverDepth = 50f;
     public float RiverWidth = 220f;
-    [Tooltip("Lateral meander amplitude (metres) and wavelength (metres along Z).")]
+    [Tooltip("Authored route the valley follows — the corridor the plane must " +
+             "fly. Assign a RiverValleyPath (draw it with the Spline tool). " +
+             "When set, the carve tracks this spline and the meander fields " +
+             "below are ignored. Leave empty for the procedural sin() meander.")]
+    public RiverValleyPath RiverPath;
+    [Tooltip("Resolution of the distance field used to carve the authored " +
+             "path. 513 over 10 km ≈ 19 m/texel, smooth under a 220 m valley. " +
+             "Raise for a tighter route, lower for a faster bake. (No effect " +
+             "on the procedural fallback.)")]
+    [Range(129, 2049)] public int RiverPathFieldRes = 513;
+    [Tooltip("Lateral meander amplitude (metres) and wavelength (metres along Z). " +
+             "Used only by the procedural fallback (no RiverPath assigned).")]
     public float RiverMeander = 1200f;
     public float RiverMeanderWavelength = 4000f;
+
+    // Coarse world-XZ distance-to-route field (metres, clamped to RiverWidth),
+    // baked once per Generate when an authored RiverPath is in use. Bilinearly
+    // sampled in the height loop so the carve costs ~4 taps, not a polyline
+    // scan, per heightmap cell.
+    float[,] _riverField;
+    bool _riverFieldReady;
 
     [Header("Spawn Pad (kept flat for takeoff + spawn shell)")]
     [Tooltip("World XZ centre of the flat pad (terrain-local; (0,0) = SW corner). Default = map centre.")]
@@ -129,6 +147,12 @@ public class TerrainGenerator : MonoBehaviour
         data.heightmapResolution = res;
         data.size = new Vector3(SizeX, HeightMetres, SizeZ);
 
+        // The spline lives in world space; the heightmap is terrain-local
+        // (0..Size). This origin bridges the two for the authored carve.
+        Vector3 origin = TargetTerrain.transform.position;
+        bool authoredRiver = EnableRiver && RiverPath != null && RiverPath.HasPath;
+        if (authoredRiver) BuildRiverField(origin);
+
         // Seed -> stable, well-separated noise offsets (PerlinNoise has no seed).
         var rng = new System.Random(Seed);
         Vector2 oCont = RandOffset(rng), oHill = RandOffset(rng);
@@ -169,8 +193,11 @@ public class TerrainGenerator : MonoBehaviour
                 if (EnableCarpathians)
                     h += CarpathianBand(sx, sz, oRidge, oArc) * RidgeRelief;
 
-                // River valley: carve a meandering channel below the floor.
-                if (EnableRiver)
+                // River valley: carve a channel below the floor. Authored
+                // route if a RiverPath is assigned, else the sin() meander.
+                if (authoredRiver)
+                    h -= RiverCarveAuthored(wx, wz);
+                else if (EnableRiver)
                     h -= RiverCarve(wx, wz);
 
                 // Flatten the spawn pad so takeoff + the spawn shell stay clear.
@@ -384,6 +411,58 @@ public class TerrainGenerator : MonoBehaviour
         return (1f - Mathf.SmoothStep(0f, 1f, d / RiverWidth)) * RiverDepth;
     }
 
+    // Authored carve: identical V profile to RiverCarve, but the distance to
+    // the channel comes from the spline route instead of a sin() path.
+    // Reads the precomputed distance field (bilinear) so this stays ~4 taps
+    // per heightmap cell rather than a polyline scan.
+    float RiverCarveAuthored(float wx, float wz)
+    {
+        if (!_riverFieldReady) return 0f;
+        float d = SampleRiverField(wx, wz);
+        if (d >= RiverWidth) return 0f;
+        return (1f - Mathf.SmoothStep(0f, 1f, d / RiverWidth)) * RiverDepth;
+    }
+
+    // Bake distance-to-route (metres, clamped to RiverWidth so the field only
+    // needs to be sharp near the channel) over the terrain footprint. F²
+    // queries against the cached polyline — cheap next to the F-up heightmap.
+    void BuildRiverField(Vector3 origin)
+    {
+        _riverFieldReady = false;
+        RiverPath.RebuildCache();
+        if (!RiverPath.HasPath) return;
+
+        int f = Mathf.Clamp(RiverPathFieldRes, 129, 2049);
+        _riverField = new float[f, f];
+        for (int zi = 0; zi < f; zi++)
+        {
+            float wz = origin.z + zi / (float)(f - 1) * SizeZ;
+            for (int xi = 0; xi < f; xi++)
+            {
+                float wx = origin.x + xi / (float)(f - 1) * SizeX;
+                _riverField[zi, xi] =
+                    Mathf.Min(RiverPath.DistanceXZ(wx, wz), RiverWidth);
+            }
+        }
+        _riverFieldReady = true;
+    }
+
+    // Bilinear lookup into _riverField. (wx, wz) are terrain-local metres
+    // (0..Size), matching the heightmap loop.
+    float SampleRiverField(float wx, float wz)
+    {
+        int f = _riverField.GetLength(0);
+        float fx = Mathf.Clamp(wx / SizeX, 0f, 1f) * (f - 1);
+        float fz = Mathf.Clamp(wz / SizeZ, 0f, 1f) * (f - 1);
+        int x0 = Mathf.FloorToInt(fx), z0 = Mathf.FloorToInt(fz);
+        int x1 = Mathf.Min(x0 + 1, f - 1), z1 = Mathf.Min(z0 + 1, f - 1);
+        float tx = fx - x0, tz = fz - z0;
+
+        float a = Mathf.Lerp(_riverField[z0, x0], _riverField[z0, x1], tx);
+        float b = Mathf.Lerp(_riverField[z1, x0], _riverField[z1, x1], tx);
+        return Mathf.Lerp(a, b, tz);
+    }
+
     // Blend the terrain toward BaseElevation inside FlattenRadius, easing out
     // across FlattenBlend so the spawn pad is flat without a hard rim.
     float ApplyFlattenPad(float x, float z, float h)
@@ -416,6 +495,40 @@ public class TerrainGenerator : MonoBehaviour
         DrawCircle(padCentre, FlattenRadius);
         Gizmos.color = new Color(0.3f, 1f, 0.4f, 0.25f);
         DrawCircle(padCentre, FlattenRadius + FlattenBlend);
+
+        // Authored river/flight corridor: centreline + the ±RiverWidth banks
+        // where the carved V meets the surrounding terrain. Lifted to the
+        // (already-baked) ground so it reads as the channel you fly.
+        if (EnableRiver && RiverPath != null && RiverPath.HasPath)
+        {
+            var p = RiverPath.PolylineXZ;
+            if (p.Count < 2) RiverPath.RebuildCache();
+            for (int i = 1; i < p.Count; i++)
+            {
+                Vector2 pa = p[i - 1], pb = p[i];
+                Vector2 dir = (pb - pa);
+                if (dir.sqrMagnitude < 1e-6f) continue;
+                dir.Normalize();
+                Vector2 nrm = new(dir.y, -dir.x);       // XZ perpendicular
+
+                Gizmos.color = new Color(0.3f, 0.7f, 1f, 0.9f);
+                Gizmos.DrawLine(GroundPt(t, pa), GroundPt(t, pb));
+
+                Vector2 la = pa + nrm * RiverWidth, lb = pb + nrm * RiverWidth;
+                Vector2 ra = pa - nrm * RiverWidth, rb = pb - nrm * RiverWidth;
+                Gizmos.color = new Color(0.3f, 0.7f, 1f, 0.35f);
+                Gizmos.DrawLine(GroundPt(t, la), GroundPt(t, lb));
+                Gizmos.DrawLine(GroundPt(t, ra), GroundPt(t, rb));
+            }
+        }
+    }
+
+    // World point at terrain-XZ p, lifted onto the terrain surface.
+    static Vector3 GroundPt(Terrain t, Vector2 p)
+    {
+        var w = new Vector3(p.x, 0f, p.y);
+        w.y = t.transform.position.y + t.SampleHeight(w);
+        return w;
     }
 
     static void DrawCircle(Vector3 centre, float radius, int seg = 64)

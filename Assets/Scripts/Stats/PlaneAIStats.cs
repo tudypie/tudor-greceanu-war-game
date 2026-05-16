@@ -24,6 +24,21 @@ public class PlaneAIStats : ScriptableObject
     [Tooltip("Multiplier on the human player's effective distance during target selection. >1 makes the AI prefer other AI (allies) over the player; it only commits to the player when the player is the only hostile or vastly closer. 1 = no bias. Overridden while retaliating.")]
     public float PlayerTargetBias = 1f;
 
+    [Header("Target Crowd Control (don't dogpile one plane)")]
+    [Tooltip("Max enemy AIs that may pursue any one PLAYER-faction plane at once. An AI that would have picked the player while the cap is full instead falls through to another hostile (an ally) or keeps patrolling/wandering. It does NOT evict an AI already locked on. 0 = unlimited (old behaviour). The count is GLOBAL across every AI in the scene. Retaliation ignores this cap (whoever shoots it gets chased regardless).")]
+    public int MaxAttackersOnPlayer = 4;
+    [Tooltip("Same crowd cap, but applied to ANY single friendly target (player OR ally), so once the player is full the overflow doesn't just collapse onto one ally. 0 = unlimited.")]
+    public int MaxAttackersPerTarget = 0;
+
+    [Header("Distraction (fly around / act dumb instead of swarming)")]
+    [Tooltip("Probability the AI actually commits the instant it could acquire a target. On a miss it stays on patrol and is 'distracted' (wandering, ignoring all targets) for a Distracted duration, then may roll again. 1 = always commits (old behaviour); lower = a more confused, scattered swarm.")]
+    [Range(0f, 1f)] public float EngageChance = 0.65f;
+    [Tooltip("Chance, evaluated once per TargetRefreshInterval while ALREADY chasing, that the AI loses interest and wanders off distracted instead of pressing the attack. Suppressed while retaliating. 0 = never self-disengages (old behaviour). Small values compound over time: ~0.015 at a 0.5s refresh ≈ a ~30s mean attention span before it breaks contact.")]
+    [Range(0f, 1f)] public float DistractionChance = 0.015f;
+    [Tooltip("While distracted the AI ignores every target and just patrols/wanders. Duration randomised between Min and Max seconds. Being shot (retaliation) still snaps it straight out of it.")]
+    public float DistractedDurationMin = 5f;
+    public float DistractedDurationMax = 12f;
+
     [Header("Retaliation (turn on whoever shoots it)")]
     [Tooltip("When hit by a hostile, immediately drop everything and pursue the attacker — even if it was patrolling, mid break-off, or the attacker is beyond AcquireRange.")]
     public bool RetaliateWhenShot = true;

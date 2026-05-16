@@ -11,6 +11,15 @@ using UnityEngine;
 //   * It periodically performs a DELIBERATE, time-boxed break-off so the
 //     player gets a window to reposition, then turns back in.
 //
+// Crowd control (for the big N-vs-few mission): a GLOBAL cap limits how many
+// AIs may pursue any one player/ally plane at once (Stats.MaxAttackersOnPlayer
+// / MaxAttackersPerTarget) so a 25-plane swarm can't all collapse onto the
+// player — the overflow targets allies or just wanders. On top of that each AI
+// has a per-airframe "distraction": it only commits to a target with
+// probability Stats.EngageChance, and while chasing may lose interest
+// (Stats.DistractionChance) and wander off for a while. Retaliation overrides
+// both (whoever shoots it still gets hunted).
+//
 // Terrain: the floor is terrain-relative. Ground height is sampled under and
 // ahead of the plane via Terrain.SampleHeight (no physics layers involved, so
 // it works regardless of how the terrain collider is layered) and the AI
@@ -49,6 +58,19 @@ public class PlaneAIController : MonoBehaviour
     PlaneHealth _target;
     float _nextTargetRefresh;
     float _targetOutOfRangeSince = -1f;
+
+    // Global crowd cap. Counts, across every AI in the scene, how many are
+    // currently pursuing each friendly plane, so a swarm can't all dogpile one
+    // target. _countedTarget is the plane THIS AI is currently counted against
+    // (kept in sync through SetTarget / OnDestroy so the count never leaks).
+    static readonly System.Collections.Generic.Dictionary<PlaneHealth, int>
+        s_attackerCount = new();
+    PlaneHealth _countedTarget;
+
+    // Distraction: "fly around / act dumb" budget. While distracted the AI
+    // ignores all targets and just patrols. Retaliation snaps it out.
+    float _distractedUntil = -1f;
+    bool Distracted => Time.fixedTime < _distractedUntil;
 
     // Retaliation: when shot by a hostile, lock onto the attacker for
     // RetaliationDuration seconds — overrides the player-target bias, ignores
@@ -122,6 +144,7 @@ public class PlaneAIController : MonoBehaviour
     void OnDestroy()
     {
         if (_health != null) _health.DamagedBy -= OnDamagedBy;
+        RegisterAttacker(null); // free our crowd-cap slot
     }
 
     // Turn on whoever shoots us (covers the player) and stay locked for
@@ -134,6 +157,7 @@ public class PlaneAIController : MonoBehaviour
         if (_health == null || !_health.IsHostileTo(attacker)) return;
         _retaliateTarget = attacker;
         _retaliateUntil = Time.fixedTime + Stats.RetaliationDuration;
+        _distractedUntil = -1f; // being shot snaps it out of wandering
         SetTarget(attacker);
     }
 
@@ -812,6 +836,14 @@ public class PlaneAIController : MonoBehaviour
             return;
         }
 
+        // Distracted: ignore everything and wander (handled by the Patrolling
+        // state, which keeps picking patrol waypoints while _target is null).
+        if (Distracted)
+        {
+            SetTarget(null);
+            return;
+        }
+
         // Drop a dead/destroyed or run-away target.
         if (_target != null && (_target.IsDead || (!force && TargetLostByRange())))
         {
@@ -835,6 +867,10 @@ public class PlaneAIController : MonoBehaviour
         {
             if (ph == null || ph == _health || ph.IsDead) continue;
             if (!_health.IsHostileTo(ph)) continue;
+            // Crowd cap: a hostile already saturated with attackers is
+            // invisible to acquisition AND to the switch logic, so the overflow
+            // spreads to other hostiles or wanders instead of dogpiling.
+            if (TargetSlotFull(ph)) continue;
             var dSq = (ph.transform.position - myPos).sqrMagnitude;
             var scoreSq = ph.Faction == PlaneFaction.Player ? dSq * playerScoreMul : dSq;
             if (scoreSq < bestScoreSq)
@@ -853,13 +889,30 @@ public class PlaneAIController : MonoBehaviour
         // (TRUE distance — the bias never makes a sole player unreachable).
         if (_target == null)
         {
-            if (force || bestDistSq <= acquireSq) SetTarget(best);
+            if (force || bestDistSq <= acquireSq)
+            {
+                // Don't always commit: on a failed roll, wander off distracted
+                // instead of engaging, so the swarm looks confused/scattered.
+                if (Stats.EngageChance < 1f && Random.value > Stats.EngageChance)
+                    StartDistraction();
+                else
+                    SetTarget(best);
+            }
             return;
         }
 
-        // Already chasing: keep it, but switch to a clearly-better (bias-
-        // weighted) hostile so it won't ditch an ally just because the player
-        // drifted slightly closer.
+        // Already chasing: small per-refresh chance to simply lose interest and
+        // wander off (acts dumb, thins the pursuit). Retaliation suppresses it.
+        if (Stats.DistractionChance > 0f && !RetaliationActive &&
+            Random.value < Stats.DistractionChance)
+        {
+            StartDistraction();
+            return;
+        }
+
+        // Otherwise keep it, but switch to a clearly-better (bias-weighted)
+        // hostile so it won't ditch an ally just because the player drifted
+        // slightly closer.
         if (best == _target) return;
         var curDistSq = (_target.transform.position - myPos).sqrMagnitude;
         var curScoreSq = _target.Faction == PlaneFaction.Player
@@ -876,7 +929,55 @@ public class PlaneAIController : MonoBehaviour
         if (_target == t) return;
         _target = t;
         _targetOutOfRangeSince = -1f;
+        RegisterAttacker(t);
         ResetLagBuffer(t);
+    }
+
+    // --- Crowd cap + distraction -------------------------------------------
+
+    // Wipe the shared count before every play session, so it survives
+    // "Enter Play Mode" with domain reload disabled (no ghost attackers).
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetCrowdRegistry() => s_attackerCount.Clear();
+
+    static int AttackerCount(PlaneHealth t) =>
+        t != null && s_attackerCount.TryGetValue(t, out var n) ? n : 0;
+
+    // Move this AI's single occupancy slot from its old target to the new one
+    // (null = release). The only place s_attackerCount is mutated.
+    void RegisterAttacker(PlaneHealth t)
+    {
+        if (_countedTarget == t) return;
+        if (_countedTarget != null && s_attackerCount.TryGetValue(_countedTarget, out var n))
+        {
+            if (n <= 1) s_attackerCount.Remove(_countedTarget);
+            else s_attackerCount[_countedTarget] = n - 1;
+        }
+        _countedTarget = t;
+        if (t != null)
+            s_attackerCount[t] = AttackerCount(t) + 1;
+    }
+
+    // Is this hostile already at its crowd cap (counting only OTHER AIs, so we
+    // never evict ourselves off a target we already hold)? Player-faction
+    // planes use MaxAttackersOnPlayer; everyone else MaxAttackersPerTarget.
+    bool TargetSlotFull(PlaneHealth t)
+    {
+        if (t == null) return false;
+        var cap = t.Faction == PlaneFaction.Player
+            ? Stats.MaxAttackersOnPlayer
+            : Stats.MaxAttackersPerTarget;
+        if (cap <= 0) return false; // unlimited
+        var others = AttackerCount(t);
+        if (_countedTarget == t) others--; // discount our own slot
+        return others >= cap;
+    }
+
+    void StartDistraction()
+    {
+        SetTarget(null);
+        _distractedUntil = Time.fixedTime +
+            Random.Range(Stats.DistractedDurationMin, Stats.DistractedDurationMax);
     }
 
     // --- Gun aim-assist (genuinely dangerous when it gets position) --------

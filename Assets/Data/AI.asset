@@ -22,6 +22,14 @@ MonoBehaviour:
   TargetRefreshInterval: 0.5
   TargetSwitchHysteresis: 0.75
   PlayerTargetBias: 6
+  MaxAttackersOnPlayer: 4
+  MaxAttackersPerTarget: 3
+  EngageChance: 0.65
+  DistractionChance: 0.05
+  DistractedDurationMin: 5
+  DistractedDurationMax: 12
+  RetaliateWhenShot: 1
+  RetaliationDuration: 8
   LagSeconds: 0.08
   SteerLeadTime: 0.25
   PatrolRadius: 350
@@ -39,10 +47,10 @@ MonoBehaviour:
   FireConeDeg: 18
   FireRange: 400
   FireMinDistance: 15
-  GunLockAcquireTime: 0.05
+  GunLockAcquireTime: 0.25
   GunLockMaxCorrectionDeg: 22
   GunAimNoiseDeg: 3
-  GunAimNoiseFrequency: 4
+  GunAimNoiseFrequency: 8
   GunAimNoisePointBlankScale: 0.7
   GunLeadTime: 0.02
   BurstMin: 0.8
@@ -63,3 +71,21 @@ MonoBehaviour:
   AltitudeRecoverStrength: 800
   TerrainAvoidLateralStrength: 500
   CeilingClearance: 120
+  BoundaryClearance: 250
+  GcaEnabled: 1
+  GcaUsePredictiveSim: 0
+  GcaRecoverTime: 1.4
+  GcaProbeHorizonTime: 4
+  GcaProbeStride: 3
+  GcaFanHalfAngleDeg: 8
+  GcaDepthRef: 80
+  GcaThreatAttackTime: 0.1
+  GcaThreatReleaseTime: 0.6
+  GcaSoftThreat: 0.25
+  GcaDisengageThreat: 0.55
+  GcaReengageThreat: 0.3
+  GcaEvadeMinTime: 1
+  GcaHardThreat: 0.8
+  GcaGunColdThreat: 0.5
+  GcaClimbOutMargin: 80
+  GcaRouteProbeCount: 6
