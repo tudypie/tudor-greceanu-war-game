@@ -13,7 +13,7 @@ public class PlaneAIStats : ScriptableObject
     [Header("Targeting")]
     [Tooltip("While patrolling (no target), a hostile within this range of the AI's CURRENT position is acquired. Measured from the plane, NOT its spawn point.")]
     public float AcquireRange = 900f;
-    [Tooltip("Once chasing, the target is only dropped after it stays beyond this range for LoseTargetTime seconds. Make it comfortably larger than AcquireRange so a brief gap doesn't end the fight.")]
+    [Tooltip("Once chasing, the target is dropped only after it stays beyond this range for LoseTargetTime seconds. Keep comfortably larger than AcquireRange.")]
     public float LoseRange = 1500f;
     [Tooltip("Seconds the target must stay beyond LoseRange before the AI gives up and returns to patrol.")]
     public float LoseTargetTime = 6f;
@@ -21,19 +21,19 @@ public class PlaneAIStats : ScriptableObject
     public float TargetRefreshInterval = 0.5f;
     [Tooltip("A new candidate must be this fraction of the current target's distance (or closer) to steal the lock. <1 adds hysteresis.")]
     public float TargetSwitchHysteresis = 0.75f;
-    [Tooltip("Multiplier on the human player's effective distance during target selection. >1 makes the AI prefer other AI (allies) over the player; it only commits to the player when the player is the only hostile or vastly closer. 1 = no bias. Overridden while retaliating.")]
+    [Tooltip("Multiplier on the player's effective distance during selection. >1 makes the AI prefer allies, committing to the player only when it is the sole hostile or vastly closer. 1 = no bias. Overridden while retaliating.")]
     public float PlayerTargetBias = 1f;
 
     [Header("Target Crowd Control (don't dogpile one plane)")]
-    [Tooltip("Max enemy AIs that may pursue any one PLAYER-faction plane at once. An AI that would have picked the player while the cap is full instead falls through to another hostile (an ally) or keeps patrolling/wandering. It does NOT evict an AI already locked on. 0 = unlimited (old behaviour). The count is GLOBAL across every AI in the scene. Retaliation ignores this cap (whoever shoots it gets chased regardless).")]
+    [Tooltip("Max enemy AIs (counted globally) that may pursue any one PLAYER-faction plane at once. Overflow falls through to another hostile or keeps wandering; an AI already locked on is never evicted. Retaliation ignores this. 0 = unlimited.")]
     public int MaxAttackersOnPlayer = 4;
-    [Tooltip("Same crowd cap, but applied to ANY single friendly target (player OR ally), so once the player is full the overflow doesn't just collapse onto one ally. 0 = unlimited.")]
+    [Tooltip("Same crowd cap applied to ANY single friendly target (player or ally), so the overflow off a full player doesn't collapse onto one ally. 0 = unlimited.")]
     public int MaxAttackersPerTarget = 0;
 
     [Header("Distraction (fly around / act dumb instead of swarming)")]
-    [Tooltip("Probability the AI actually commits the instant it could acquire a target. On a miss it stays on patrol and is 'distracted' (wandering, ignoring all targets) for a Distracted duration, then may roll again. 1 = always commits (old behaviour); lower = a more confused, scattered swarm.")]
+    [Tooltip("Probability the AI commits when it could acquire a target. On a miss it wanders (LoseInterest) for a Distracted duration, then may roll again. 1 = always commits; lower = a more scattered swarm.")]
     [Range(0f, 1f)] public float EngageChance = 0.65f;
-    [Tooltip("Chance, evaluated once per TargetRefreshInterval while ALREADY chasing, that the AI loses interest and wanders off distracted instead of pressing the attack. Suppressed while retaliating. 0 = never self-disengages (old behaviour). Small values compound over time: ~0.015 at a 0.5s refresh ≈ a ~30s mean attention span before it breaks contact.")]
+    [Tooltip("Chance per TargetRefreshInterval, while already chasing, that the AI loses interest and wanders off. Suppressed while retaliating. ~0.015 at a 0.5s refresh ≈ a ~30s mean attention span. 0 = never self-disengages.")]
     [Range(0f, 1f)] public float DistractionChance = 0.015f;
     [Tooltip("While distracted the AI ignores every target and just patrols/wanders. Duration randomised between Min and Max seconds. Being shot (retaliation) still snaps it straight out of it.")]
     public float DistractedDurationMin = 5f;
@@ -81,13 +81,13 @@ public class PlaneAIStats : ScriptableObject
     public float GunLockAcquireTime = 0.15f;
     [Tooltip("Max degrees the assisted gun solution may bend off the nose. Hard jinkers that pull more than this still beat it.")]
     public float GunLockMaxCorrectionDeg = 16f;
-    [Tooltip("Gun spray (deg). ALWAYS applied — even point-blank dead on the tail (scaled by GunAimNoisePointBlankScale) — and grows with range / off-tail aspect. This is the main difficulty knob: lower = the AI lands shots and is deadly, higher = it sprays and misses. Kept small so when it has your tail it actually hits.")]
+    [Tooltip("Gun spray (deg), always applied (scaled by GunAimNoisePointBlankScale at point-blank) and growing with range / off-tail aspect. Main difficulty knob: lower = deadly, higher = sprays and misses.")]
     public float GunAimNoiseDeg = 1.5f;
     [Tooltip("Frequency (Hz) of the Perlin jitter on the noised shot. High enough that a burst sprays between shots instead of walking on as one coherent block.")]
     public float GunAimNoiseFrequency = 9f;
     [Tooltip("Fraction of GunAimNoiseDeg applied at point-blank range; it ramps up to the full value at FireRange. 1 = noise constant with range.")]
     [Range(0f, 1f)] public float GunAimNoisePointBlankScale = 0.7f;
-    [Tooltip("The gun is HITSCAN (instant raycast) so it does NOT lead — keep this tiny. It only compensates the sub-step between the AI's solve and the shot. 0.15+ will throw shots ahead of crossing targets.")]
+    [Tooltip("The gun is HITSCAN so it does NOT lead — keep tiny. Only compensates the AI's solve→shot sub-step; 0.15+ throws shots ahead of crossing targets.")]
     public float GunLeadTime = 0.02f;
 
     [Header("Burst Fire")]
@@ -126,17 +126,17 @@ public class PlaneAIStats : ScriptableObject
     public float TerrainAvoidLateralStrength = 500f;
 
     [Header("Service Ceiling (mirror of the floor, inverted)")]
-    [Tooltip("How far below the flight model's ServiceCeiling the AI keeps. It clamps its aim point to (ServiceCeiling - this) and adds a soft DOWNWARD bias within this band (reusing AltitudeRecoverStrength), so it levels off instead of porpoising where the flight model would force its nose down anyway. Keep it comfortably larger than the flight CeilingRecoverMargin.")]
+    [Tooltip("How far below the flight model's ServiceCeiling the AI keeps: clamps the aim point and adds a soft downward bias in this band so it levels off on its own. Keep larger than the flight CeilingRecoverMargin.")]
     public float CeilingClearance = 120f;
 
     [Header("Map Boundary (horizontal mirror of the ceiling)")]
-    [Tooltip("How far inside the scene's MapBoundary box the AI keeps. It clamps its aim point (and patrol waypoints) to the box shrunk by this, and adds a soft INWARD bias over this band out to the hard edge (reusing AltitudeRecoverStrength), so it turns back on its own instead of grinding against the flight model's hard turn-back. Keep it comfortably larger than the MapBoundary RecoverMargin.")]
+    [Tooltip("How far inside the scene's MapBoundary box the AI keeps: clamps the aim point and patrol waypoints and adds a soft inward bias in this band so it turns back on its own. Keep larger than the MapBoundary RecoverMargin.")]
     public float BoundaryClearance = 250f;
 
     [Header("Predictive Ground-Collision Avoidance (GCAS)")]
     [Tooltip("Master switch. When off, the AI falls back to the legacy soft altitude bias (Layer 1 floor clamp + Layer 3 hard pull-up still protect it).")]
     public bool GcaEnabled = true;
-    [Tooltip("When off (default), the terrain threat is estimated by casting the TRUE velocity forward (cheap, robust). When on, it is estimated by simulating the plane's best-effort pull-up recovery (more accurate over rising terrain, slightly costlier). Flip on only if field-testing shows late triggers on the steepest ridges.")]
+    [Tooltip("Off (default): threat from casting the true velocity forward (cheap, robust). On: simulates the best-effort pull-up recovery (more accurate over rising terrain, costlier). Flip on only if ridges trigger late.")]
     public bool GcaUsePredictiveSim = false;
     [Tooltip("Seconds the plane needs to arrest a dive and start climbing. Used as the time reference for the threat ramp: a predicted ground contact closer than this in time saturates the threat. Larger = the AI reacts earlier / more cautiously.")]
     public float GcaRecoverTime = 1.4f;
@@ -154,11 +154,11 @@ public class PlaneAIStats : ScriptableObject
     public float GcaThreatReleaseTime = 0.60f;
     [Tooltip("At/above this threat the graduated overlay begins (gentle wings-level + aim toward the climb-out point).")]
     [Range(0f, 1f)] public float GcaSoftThreat = 0.25f;
-    [Tooltip("While Pursuing, at/above this threat the AI abandons the chase and enters TerrainEvade (climb out, then re-engage). Must exceed GcaReengageThreat.")]
+    [Tooltip("DEPRECATED — no longer read; the always-on GCAS overlay replaced the TerrainEvade state. Kept for .asset compat.")]
     [Range(0f, 1f)] public float GcaDisengageThreat = 0.55f;
-    [Tooltip("TerrainEvade exits once the threat falls to/below this (Schmitt: lower than GcaDisengageThreat) AND GcaEvadeMinTime has elapsed.")]
+    [Tooltip("DEPRECATED — no longer read; the always-on GCAS overlay replaced the TerrainEvade state. Kept for .asset compat.")]
     [Range(0f, 1f)] public float GcaReengageThreat = 0.30f;
-    [Tooltip("Minimum seconds the AI stays in TerrainEvade before it is allowed to re-engage, so it doesn't flip straight back into the dive.")]
+    [Tooltip("DEPRECATED — no longer read; the always-on GCAS overlay replaced the TerrainEvade state. Kept for .asset compat.")]
     public float GcaEvadeMinTime = 1f;
     [Tooltip("At/above this threat the AI commands a decisive full nose-up, wings-level pull (bypasses proportional PitchGain) — the predictive equivalent of the hard floor override, fired while still recoverable.")]
     [Range(0f, 1f)] public float GcaHardThreat = 0.80f;

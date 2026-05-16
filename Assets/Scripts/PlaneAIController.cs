@@ -1,45 +1,24 @@
 using UnityEngine;
 
-// Enemy fighter AI.
+// Enemy fighter AI. State machine: Patrol -> Engage -> Disengage.
 //
-// Engagement model (per design):
-//   * It patrols around its spawn anchor ONLY while it has no target.
-//   * The instant a hostile is within AcquireRange of its CURRENT position it
-//     commits and chases the closest target as far as it has to — there is no
-//     spawn-point leash. It only gives up if the target dies or stays beyond
-//     LoseRange for LoseTargetTime.
-//   * It periodically performs a DELIBERATE, time-boxed break-off so the
-//     player gets a window to reposition, then turns back in.
+// Disengage is parameterised by reason: Window/Overshoot keep the target (and
+// its crowd-cap slot) and re-engage after a short timer; LoseInterest drops the
+// target (freeing its slot so the swarm reshuffles) and wanders for longer. A
+// global crowd cap stops a swarm dogpiling one plane; retaliation (turn on
+// whoever shot us) overrides the player bias and all disengages.
 //
-// Crowd control (for the big N-vs-few mission): a GLOBAL cap limits how many
-// AIs may pursue any one player/ally plane at once (Stats.MaxAttackersOnPlayer
-// / MaxAttackersPerTarget) so a 25-plane swarm can't all collapse onto the
-// player — the overflow targets allies or just wanders. On top of that each AI
-// has a per-airframe "distraction": it only commits to a target with
-// probability Stats.EngageChance, and while chasing may lose interest
-// (Stats.DistractionChance) and wander off for a while. Retaliation overrides
-// both (whoever shoots it still gets hunted).
-//
-// Terrain: the floor is terrain-relative. Ground height is sampled under and
-// ahead of the plane via Terrain.SampleHeight (no physics layers involved, so
-// it works regardless of how the terrain collider is layered) and the AI
-// climbs over ridges before reaching them. A three-layer floor is preserved:
-//   1. the final aim point's Y is clamped to the anticipated terrain floor,
-//   2. a soft upward bias ramps in within a band above the floor,
-//   3. a hard override below the actual floor: wings-level, full nose-up,
-//      guns cold, with hysteresis.
-//
-// Ceiling: the same idea, inverted. The AI clamps its aim point below
-// (PlaneFlightModel.EffectiveServiceCeiling - CeilingClearance) and adds a soft
-// DOWNWARD bias within that band, so it levels off on its own instead of
-// porpoising where PlaneFlightModel would force its nose down anyway. The
-// hard physical limit itself is enforced by PlaneFlightModel for every plane.
+// Flight safety is an OVERLAY, not a state: a predictive ground-collision
+// threat blends the aim to a climb-out point and, at high threat, commands a
+// hard wings-level pull with guns cold. A Layer-1 aim clamp and Layer-3 hard
+// floor-recovery sit under it, mirrored for the ceiling and map boundary.
 [DefaultExecutionOrder(-100)]
 [RequireComponent(typeof(PlaneFlightModel))]
 [RequireComponent(typeof(PlaneHealth))]
 public class PlaneAIController : MonoBehaviour
 {
-    enum AIState { Patrolling, Pursuing, BreakOff, TerrainEvade }
+    enum AIState { Patrol, Engage, Disengage }
+    enum DisengageReason { Window, LoseInterest, Overshoot }
 
     PlaneFlightModel _model;
     PlaneShooter _shooter;
@@ -53,39 +32,34 @@ public class PlaneAIController : MonoBehaviour
     Vector3 _anchor;
     Vector3 _patrolWaypoint;
     float _patrolWaypointDeadline;
-    AIState _state = AIState.Patrolling;
+    AIState _state = AIState.Patrol;
 
     PlaneHealth _target;
     float _nextTargetRefresh;
     float _targetOutOfRangeSince = -1f;
 
-    // Global crowd cap. Counts, across every AI in the scene, how many are
-    // currently pursuing each friendly plane, so a swarm can't all dogpile one
-    // target. _countedTarget is the plane THIS AI is currently counted against
-    // (kept in sync through SetTarget / OnDestroy so the count never leaks).
+    // Global crowd cap: how many AIs (across the scene) pursue each friendly
+    // plane. _countedTarget is the plane THIS AI is counted against, kept in
+    // sync through SetTarget/OnDestroy so the count never leaks.
     static readonly System.Collections.Generic.Dictionary<PlaneHealth, int>
         s_attackerCount = new();
     PlaneHealth _countedTarget;
 
-    // Distraction: "fly around / act dumb" budget. While distracted the AI
-    // ignores all targets and just patrols. Retaliation snaps it out.
-    float _distractedUntil = -1f;
-    bool Distracted => Time.fixedTime < _distractedUntil;
-
-    // Retaliation: when shot by a hostile, lock onto the attacker for
-    // RetaliationDuration seconds — overrides the player-target bias, ignores
-    // range loss, and skips the deliberate break-off (terrain safety still
-    // wins). Each fresh hit pushes the deadline out.
+    // Retaliation: when shot by a hostile, lock onto the attacker; overrides
+    // the player-target bias, ignores range loss, and skips disengages
+    // (terrain safety still wins). Each fresh hit pushes the deadline out.
     PlaneHealth _retaliateTarget;
     float _retaliateUntil = -1f;
     bool RetaliationActive =>
         _retaliateTarget != null && !_retaliateTarget.IsDead &&
         Time.fixedTime < _retaliateUntil;
 
-    // Deliberate break-off scheduling.
+    // Disengage scheduling.
+    DisengageReason _disengageReason;
     float _engageBreakAt;
-    float _breakOffUntil;
+    float _disengageUntil;
     float _nextBreakAllowed;
+    float _nextDistractionRollAt;
     Vector3 _breakAimPoint;
 
     // Gun aim-assist.
@@ -98,19 +72,15 @@ public class PlaneAIController : MonoBehaviour
 
     // Predictive ground-collision avoidance (GCAS).
     float _threat;
-    float _evadeMinUntil;
     float _gcaWorstFloorAhead;
     Vector3 _gcaGroundDir = Vector3.forward;
     Vector3 _gcaClimbOutPoint;
     readonly float[] _rayYaw = new float[3];
     readonly System.Collections.Generic.List<Vector3> _gcaTrack = new();
 
-    // Terrain.
     Terrain _terrain;
     float _terrainBaseY;
 
-    // Cached "other planes" list for collision avoidance (refreshed on an
-    // interval instead of every physics step).
     PlaneFlightModel[] _avoidPlanes;
     float _nextAvoidRefresh;
 
@@ -144,12 +114,12 @@ public class PlaneAIController : MonoBehaviour
     void OnDestroy()
     {
         if (_health != null) _health.DamagedBy -= OnDamagedBy;
-        RegisterAttacker(null); // free our crowd-cap slot
+        RegisterAttacker(null);
     }
 
-    // Turn on whoever shoots us (covers the player) and stay locked for
-    // RetaliationDuration. Runs from PlaneHealth.TakeDamage — touches fields
-    // only; the actual state transition happens next FixedUpdate.
+    // Runs from PlaneHealth.TakeDamage (outside FixedUpdate): touches fields
+    // and sets the target immediately so retaliation is responsive; the state
+    // transition happens in the next UpdateState.
     void OnDamagedBy(float amount, PlaneHealth attacker)
     {
         if (Stats == null || !Stats.RetaliateWhenShot) return;
@@ -157,7 +127,6 @@ public class PlaneAIController : MonoBehaviour
         if (_health == null || !_health.IsHostileTo(attacker)) return;
         _retaliateTarget = attacker;
         _retaliateUntil = Time.fixedTime + Stats.RetaliationDuration;
-        _distractedUntil = -1f; // being shot snaps it out of wandering
         SetTarget(attacker);
     }
 
@@ -181,16 +150,15 @@ public class PlaneAIController : MonoBehaviour
         SampleTargetForLag();
         UpdateTargetLoss();
 
-        // Predictive ground-collision threat. Computed BEFORE UpdateState so
-        // the Pursuing -> TerrainEvade transition sees the current threat, and
-        // it drives the single-authority steering overlay below.
+        // Computed before UpdateState so transitions and the steering overlay
+        // below see the current threat.
         UpdateGroundThreat();
 
         UpdateState();
 
         // As the terrain threat rises, terrain wins: pursuit lead and
-        // plane-vs-plane avoidance are suppressed, the aim blends toward the
-        // recoverable climb-out point, and the wings roll level.
+        // plane-vs-plane avoidance are suppressed and the aim blends toward
+        // the recoverable climb-out point.
         var w = Stats.GcaEnabled
             ? Mathf.SmoothStep(0f, 1f,
                 Mathf.InverseLerp(Stats.GcaSoftThreat, Stats.GcaHardThreat, _threat))
@@ -209,10 +177,8 @@ public class PlaneAIController : MonoBehaviour
         if (!Stats.GcaEnabled)
             aimPoint += ComputeAltitudeSoftBias(anticipatedFloor);
 
-        // Ceiling (mirror of the floor): keep the aim point below the soft cap
-        // and add a soft downward bias as we climb into it — but only when the
-        // cap is actually above the terrain floor, so a ridge poking above the
-        // ceiling never gets clamped back down into the hillside.
+        // Ceiling (mirror of the floor), but only when the cap is above the
+        // terrain floor, so a ridge poking above it is never clamped back down.
         var ceilingCap = CeilingCapY();
         if (ceilingCap > anticipatedFloor)
         {
@@ -220,10 +186,7 @@ public class PlaneAIController : MonoBehaviour
             aimPoint += ComputeCeilingSoftBias(ceilingCap);
         }
 
-        // Map boundary (horizontal mirror of the ceiling): keep the aim point
-        // inside the scene's MapBoundary box (minus BoundaryClearance) and add
-        // an inward bias as we near the edge, so the AI comes about on its own
-        // instead of grinding against the flight model's hard turn-back.
+        // Map boundary (horizontal mirror of the ceiling).
         var boundary = MapBoundary.Instance;
         if (boundary != null)
         {
@@ -231,8 +194,7 @@ public class PlaneAIController : MonoBehaviour
             aimPoint += ComputeBoundarySoftBias(boundary);
         }
 
-        // GCAS overlay: blend the whole aim toward the recoverable climb-out
-        // point as the threat rises (replaces the additive soft bias).
+        // GCAS overlay: blend the whole aim toward the climb-out point.
         if (w > 0f) aimPoint = Vector3.Lerp(aimPoint, _gcaClimbOutPoint, w);
 
         var toAim = aimPoint - _transform.position;
@@ -254,13 +216,11 @@ public class PlaneAIController : MonoBehaviour
         _smoothRoll = Mathf.Lerp(_smoothRoll, targetRoll, alpha);
         _smoothYaw = Mathf.Lerp(_smoothYaw, targetYaw, alpha);
 
-        // GCAS overlay: roll toward wings-level as the threat rises, so pitch
-        // authority becomes climb instead of carving a turn.
+        // GCAS overlay: roll toward wings-level so pitch authority climbs.
         if (w > 0f) _smoothRoll = Mathf.Lerp(_smoothRoll, 0f, w);
 
-        // GCAS overlay: at high threat command a decisive full nose-up,
-        // wings-level pull (bypasses proportional PitchGain) — the predictive
-        // equivalent of the Layer-3 override, fired while still recoverable.
+        // GCAS overlay: at high threat, decisive full nose-up wings-level pull
+        // (bypasses proportional PitchGain) while still recoverable.
         var gcaHardPull = Stats.GcaEnabled && _threat >= Stats.GcaHardThreat;
         if (gcaHardPull)
         {
@@ -274,9 +234,9 @@ public class PlaneAIController : MonoBehaviour
         _model.YawInput = _smoothYaw;
         _model.Boost = false;
 
-        // Layer 3: hard terrain-relative override. Below the ACTUAL floor the
+        // Layer 3: hard terrain-relative override. Below the actual floor the
         // AI abandons everything and climbs out wings-level, guns cold, until
-        // it has clawed back a hysteresis margin above the floor.
+        // it claws back a hysteresis margin above the floor.
         var floorNow = CurrentFloorY();
         var margin = Mathf.Max(Stats.TerrainClearance * Stats.FloorRecoverMarginFraction,
             Stats.FloorRecoverMarginMin);
@@ -297,7 +257,7 @@ public class PlaneAIController : MonoBehaviour
             _smoothRoll = 0f;
             _smoothYaw = 0f;
             _model.PitchInput = climbPitch;
-            _model.RollInput = 0f;   // 0 lets the flight model auto-level the wings
+            _model.RollInput = 0f; // 0 lets the flight model auto-level the wings
             _model.YawInput = 0f;
             if (_shooter != null)
             {
@@ -307,7 +267,6 @@ public class PlaneAIController : MonoBehaviour
             return;
         }
 
-        // GCAS overlay: guns cold while saving the airframe.
         if (gcaHardPull || (Stats.GcaEnabled && _threat >= Stats.GcaGunColdThreat))
         {
             if (_shooter != null)
@@ -321,7 +280,7 @@ public class PlaneAIController : MonoBehaviour
         UpdateFiring();
     }
 
-    // --- Terrain floor ------------------------------------------------------
+    // --- Terrain floor ---
 
     float TerrainGroundY(Vector3 worldPos)
     {
@@ -329,8 +288,8 @@ public class PlaneAIController : MonoBehaviour
         return _terrainBaseY + _terrain.SampleHeight(worldPos);
     }
 
-    // Working floor at a world XZ: clearance above the ground, but never below
-    // the absolute PatrolMinWorldY (which also covers the no-terrain case).
+    // Clearance above the ground, but never below the absolute
+    // PatrolMinWorldY (which also covers the no-terrain case).
     float WorkingFloorAt(Vector3 worldPos)
     {
         var g = TerrainGroundY(worldPos);
@@ -340,9 +299,8 @@ public class PlaneAIController : MonoBehaviour
 
     float CurrentFloorY() => WorkingFloorAt(_transform.position);
 
-    // Highest working floor sampled along the straight segment a..b, so a
-    // waypoint / break-off point can be lifted above any hill the path to it
-    // would otherwise pass straight through (not just its endpoint).
+    // Highest working floor along a..b, so a route is lifted above any hill
+    // it would otherwise pass straight through (not just its endpoint).
     float WorstFloorAlong(Vector3 a, Vector3 b, int samples)
     {
         var n = Mathf.Clamp(samples, 2, 16);
@@ -398,18 +356,13 @@ public class PlaneAIController : MonoBehaviour
         return Vector3.up * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
-    // Soft cap the AI keeps below: CeilingClearance under the flight model's
-    // EFFECTIVE hard ceiling (the MapBoundary box top when one is in the
-    // scene, else the flight-stats ServiceCeiling). MaxValue if no model.
+    // CeilingClearance under the flight model's effective hard ceiling.
     float CeilingCapY()
     {
         if (_model == null) return float.MaxValue;
         return _model.EffectiveServiceCeiling - Stats.CeilingClearance;
     }
 
-    // Mirror of ComputeAltitudeSoftBias: a downward bias that ramps in as the
-    // plane climbs through the band below the cap, so it noses over on its own
-    // before the flight model has to force it.
     Vector3 ComputeCeilingSoftBias(float cap)
     {
         if (Stats.AltitudeRecoverStrength <= 0f) return Vector3.zero;
@@ -420,13 +373,8 @@ public class PlaneAIController : MonoBehaviour
         return Vector3.down * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
-    // --- Map boundary (horizontal mirror of the ceiling) -------------------
+    // --- Map boundary ---
 
-    // Mirror of ComputeCeilingSoftBias on the horizontal plane: as the plane
-    // pushes past the soft edge (the MapBoundary box shrunk by
-    // BoundaryClearance) an inward bias ramps in over the BoundaryClearance-
-    // wide band out to the hard edge, so it banks back on its own before the
-    // flight model has to force it.
     Vector3 ComputeBoundarySoftBias(MapBoundary boundary)
     {
         if (Stats.AltitudeRecoverStrength <= 0f) return Vector3.zero;
@@ -442,15 +390,13 @@ public class PlaneAIController : MonoBehaviour
         return inward.normalized * Stats.AltitudeRecoverStrength * (depth * depth);
     }
 
-    // --- Predictive ground-collision avoidance (GCAS) ----------------------
+    // --- Predictive ground-collision avoidance (GCAS) ---
 
-    // Signed pitch input that produces a nose-UP command for this airframe
-    // (single source of truth; reused by the Layer-3 backstop).
+    // Signed pitch input that produces a nose-UP command for this airframe.
     float ClimbInputSign() => _model.InvertPitch ? 1f : -1f;
 
-    // The plane's TRUE travel velocity (so a dive is sensed down its real
-    // path, not the horizontal nose projection). Falls back to the nose when
-    // near-stationary (e.g. the spawn frame before the flight model has run).
+    // True travel velocity (so a dive is sensed down its real path, not the
+    // horizontal nose projection); falls back to the nose when near-stationary.
     Vector3 CurrentVelocity()
     {
         var body = _model.Body;
@@ -465,16 +411,11 @@ public class PlaneAIController : MonoBehaviour
         return v.sqrMagnitude < 0.0001f ? Vector3.forward : v.normalized;
     }
 
-    // Projects the plane's trajectory forward and turns the worst predicted
-    // terrain breach into a continuous threat in [0,1], plus a recoverable
-    // climb-out point. Two trajectory models, selected by GcaUsePredictiveSim:
-    //   * off (default): straight line along the true velocity — cheap and
-    //     conservative (assumes no pull-up).
-    //   * on: simulates the best-effort pull-up recovery (reaction + actuator
-    //     lag, rate cap, climb/dive drag) — relaxes false positives over
-    //     rising terrain.
-    // A 3-ray lateral fan (estimated mid-horizon turn ± a fixed spread) covers
-    // the curved ground track a banking plane will actually fly.
+    // Projects the trajectory forward and turns the worst predicted terrain
+    // breach into a continuous threat in [0,1] plus a recoverable climb-out
+    // point. Straight-line along true velocity by default; an optional
+    // pull-up recovery sim relaxes false positives over rising terrain. A
+    // 3-ray lateral fan covers the curved track a banking plane flies.
     void UpdateGroundThreat()
     {
         if (!Stats.GcaEnabled || _terrain == null)
@@ -523,7 +464,6 @@ public class PlaneAIController : MonoBehaviour
             var p = pos;
             var prevFloor = WorkingFloorAt(p);
 
-            // Recovery-sim state (only used when useSim).
             var ground = FlatDir(dir3);
             var thetaDeg = Mathf.Asin(Mathf.Clamp(dir3.y / speed, -1f, 1f)) * Mathf.Rad2Deg;
             var inputRamp = 0f;
@@ -543,7 +483,7 @@ public class PlaneAIController : MonoBehaviour
                 }
                 else
                 {
-                    p += dir3 * step; // straight line along the true velocity
+                    p += dir3 * step;
                 }
 
                 if (i % stride != 0 && i != steps) continue;
@@ -557,7 +497,7 @@ public class PlaneAIController : MonoBehaviour
                 if (breach > maxBreach) maxBreach = breach;
                 if (breach > 0f && i * step < tHit) tHit = i * step;
 
-                if (r == 0) _gcaTrack.Add(p); // centre ray, for gizmos
+                if (r == 0) _gcaTrack.Add(p);
             }
         }
 
@@ -572,9 +512,6 @@ public class PlaneAIController : MonoBehaviour
             : Mathf.Max(Stats.GcaThreatReleaseTime, 0.0001f);
         _threat = Mathf.Lerp(_threat, raw, 1f - Mathf.Exp(-step / tau));
 
-        // Recoverable climb-out point: out along the ground track, lifted clear
-        // of the highest floor ahead. Clamp under the soft ceiling unless a
-        // ridge pokes above it (then terrain wins — same guard as the aim clamp).
         var lookDist = Mathf.Max(speed * recT, speed * step * steps * 0.5f);
         var cp = pos + _gcaGroundDir * Mathf.Max(lookDist, 1f);
         cp.y = worstFloorAhead + Stats.GcaClimbOutMargin;
@@ -584,7 +521,7 @@ public class PlaneAIController : MonoBehaviour
         _gcaWorstFloorAhead = worstFloorAhead;
     }
 
-    // --- Plane-vs-plane avoidance ------------------------------------------
+    // --- Plane-vs-plane avoidance ---
 
     Vector3 ComputeAvoidance()
     {
@@ -626,31 +563,26 @@ public class PlaneAIController : MonoBehaviour
         return bias;
     }
 
-    // --- Aim point ----------------------------------------------------------
+    // --- Aim point ---
 
     Vector3 ResolveAimPoint(float leadScale)
     {
         switch (_state)
         {
-            case AIState.Pursuing:
+            case AIState.Engage:
                 return _target != null
                     ? PredictedTargetPoint(Stats.SteerLeadTime * leadScale)
                     : _patrolWaypoint;
-            case AIState.BreakOff:
-                return _breakAimPoint;
-            case AIState.TerrainEvade:
-                // Extend along the current ground track, climbing well clear of
-                // the worst floor ahead. Recomputed each step (path-safe by
-                // construction); the GCAS overlay still stacks on top.
-                var p = _transform.position + _gcaGroundDir * Stats.ExtendDistance;
-                p.y = _gcaWorstFloorAhead + 2f * Stats.GcaClimbOutMargin;
-                return p;
+            case AIState.Disengage:
+                return _disengageReason == DisengageReason.LoseInterest
+                    ? _patrolWaypoint
+                    : _breakAimPoint;
             default:
                 return _patrolWaypoint;
         }
     }
 
-    // Lagged target position plus a velocity lead — lead pursuit, so the AI
+    // Lagged target position plus a velocity lead (lead pursuit) so the AI
     // cuts the corner and closes for guns instead of tail-chasing forever.
     Vector3 PredictedTargetPoint(float leadTime)
     {
@@ -659,113 +591,120 @@ public class PlaneAIController : MonoBehaviour
         return basePos + EstimateTargetVelocity() * leadTime;
     }
 
-    // --- State machine ------------------------------------------------------
+    // --- State machine ---
 
     void UpdateState()
     {
-        // Retaliation: drop patrol or cut a deliberate break-off short and
-        // re-engage the attacker now. TerrainEvade still owns the airframe and
-        // re-engages on its own terms once the terrain threat clears.
+        // Retaliation override: whoever shot us gets hunted now, cutting a
+        // disengage or patrol short. Terrain safety is an overlay, not a
+        // state, so nothing here yields to it.
         if (RetaliationActive && _target != null &&
-            (_state == AIState.Patrolling || _state == AIState.BreakOff))
+            (_state == AIState.Patrol || _state == AIState.Disengage))
         {
-            EnterPursuing();
+            EnterEngage();
             return;
         }
 
         switch (_state)
         {
-            case AIState.Patrolling:
+            case AIState.Patrol:
                 if (_target != null)
                 {
-                    EnterPursuing();
+                    // Don't always commit: on a failed roll, peel off and
+                    // wander so the swarm scatters instead of dogpiling.
+                    if (Stats.EngageChance < 1f && Random.value > Stats.EngageChance)
+                        EnterDisengage(DisengageReason.LoseInterest);
+                    else
+                        EnterEngage();
                     return;
                 }
-                var reachSq = Stats.PatrolWaypointReachDistance * Stats.PatrolWaypointReachDistance;
-                if ((_patrolWaypoint - _transform.position).sqrMagnitude <= reachSq ||
-                    Time.fixedTime >= _patrolWaypointDeadline)
-                {
-                    PickNewPatrolWaypoint();
-                }
+                RefreshPatrolWaypoint();
                 break;
 
-            case AIState.Pursuing:
+            case AIState.Engage:
                 if (_target == null)
                 {
-                    EnterPatrolling();
+                    EnterPatrol();
                     return;
                 }
-                // Terrain takes priority over the deliberate/merge break-offs:
-                // abandon the chase and climb out rather than grind into the
-                // ground. Keeps _target and does not touch the break-off budget.
-                if (Stats.GcaEnabled && _threat >= Stats.GcaDisengageThreat)
-                {
-                    EnterTerrainEvade();
-                    return;
-                }
-                // Scheduled, deliberate break-off (gated by the cooldown;
-                // suppressed while retaliating so it stays on its attacker).
+                // Scheduled, deliberate window break-off.
                 if (!RetaliationActive &&
                     Time.fixedTime >= _engageBreakAt && Time.fixedTime >= _nextBreakAllowed)
                 {
-                    EnterBreakOff();
+                    EnterDisengage(DisengageReason.Window);
                     return;
+                }
+                // Lose-interest: a small per-refresh chance to break contact
+                // and wander. Rolled on the target-refresh cadence so the
+                // documented mean attention span holds.
+                if (!RetaliationActive && Stats.DistractionChance > 0f &&
+                    Time.fixedTime >= _nextDistractionRollAt)
+                {
+                    _nextDistractionRollAt = Time.fixedTime + Stats.TargetRefreshInterval;
+                    if (Random.value < Stats.DistractionChance)
+                    {
+                        EnterDisengage(DisengageReason.LoseInterest);
+                        return;
+                    }
                 }
                 // Emergency break to avoid a merge/overshoot.
                 var toT = _target.transform.position - _transform.position;
                 var dist = toT.magnitude;
                 if (dist > 0.0001f && dist < Stats.MergeBreakDistance &&
-                    Time.fixedTime >= _nextBreakAllowed)
+                    Time.fixedTime >= _nextBreakAllowed &&
+                    Vector3.Dot(_transform.forward, toT / dist) < Stats.BadAspectDot)
                 {
-                    if (Vector3.Dot(_transform.forward, toT / dist) < Stats.BadAspectDot)
-                    {
-                        EnterBreakOff();
-                        return;
-                    }
+                    EnterDisengage(DisengageReason.Overshoot);
+                    return;
                 }
                 break;
 
-            case AIState.BreakOff:
-                if (Time.fixedTime >= _breakOffUntil)
+            case AIState.Disengage:
+                if (_disengageReason == DisengageReason.LoseInterest)
                 {
-                    if (_target != null) EnterPursuing();
-                    else EnterPatrolling();
+                    RefreshPatrolWaypoint();
+                    if (Time.fixedTime >= _disengageUntil) EnterPatrol();
                 }
-                break;
-
-            case AIState.TerrainEvade:
-                // Condition-based: stay until the threat has cleared (Schmitt:
-                // exits at the lower GcaReengageThreat) AND a minimum dwell has
-                // elapsed, so it doesn't flip straight back into the dive.
-                if (Time.fixedTime >= _evadeMinUntil &&
-                    _threat <= Stats.GcaReengageThreat)
+                else if (Time.fixedTime >= _disengageUntil)
                 {
-                    if (_target != null && !_target.IsDead && !TargetLostByRange())
-                        EnterPursuing();
-                    else
-                        EnterPatrolling();
+                    if (_target != null && !_target.IsDead) EnterEngage();
+                    else EnterPatrol();
                 }
                 break;
         }
     }
 
-    void EnterPatrolling()
+    void EnterPatrol()
     {
-        _state = AIState.Patrolling;
+        _state = AIState.Patrol;
         SetTarget(null);
         PickNewPatrolWaypoint();
     }
 
-    void EnterPursuing()
+    void EnterEngage()
     {
-        _state = AIState.Pursuing;
-        // Schedule the next deliberate break-off.
+        _state = AIState.Engage;
         _engageBreakAt = Time.fixedTime + Random.Range(Stats.EngageDurationMin, Stats.EngageDurationMax);
+        _nextDistractionRollAt = Time.fixedTime + Stats.TargetRefreshInterval;
     }
 
-    void EnterBreakOff()
+    // Single deliberate-disengage entry. Window/Overshoot keep the target (and
+    // its crowd-cap slot) and re-engage after a short timer; LoseInterest drops
+    // the target (freeing its slot so the swarm reshuffles) and wanders for a
+    // longer one. Retaliation overrides all of them.
+    void EnterDisengage(DisengageReason reason)
     {
-        _state = AIState.BreakOff;
+        _state = AIState.Disengage;
+        _disengageReason = reason;
+
+        if (reason == DisengageReason.LoseInterest)
+        {
+            SetTarget(null);
+            PickNewPatrolWaypoint();
+            _disengageUntil = Time.fixedTime +
+                Random.Range(Stats.DistractedDurationMin, Stats.DistractedDurationMax);
+            return;
+        }
 
         // Extend along the current heading, biased slightly away from the
         // target, so the AI separates and the player gets a clean window.
@@ -778,35 +717,34 @@ public class PlaneAIController : MonoBehaviour
                 away = (fwd - toT.normalized * 0.5f).normalized;
         }
         _breakAimPoint = _transform.position + away * Stats.ExtendDistance;
-        // Lift above the worst floor along the extend leg, not just its end.
         var floor = WorstFloorAlong(_transform.position, _breakAimPoint,
             Stats.GcaRouteProbeCount);
         if (_breakAimPoint.y < floor) _breakAimPoint.y = floor;
 
-        var duration = Random.Range(Stats.BreakOffDurationMin, Stats.BreakOffDurationMax);
-        _breakOffUntil = Time.fixedTime + duration;
-        // No second break-off until the cooldown after this one ends.
-        _nextBreakAllowed = _breakOffUntil + Stats.BreakOffCooldown;
+        _disengageUntil = Time.fixedTime +
+            Random.Range(Stats.BreakOffDurationMin, Stats.BreakOffDurationMax);
+        _nextBreakAllowed = _disengageUntil + Stats.BreakOffCooldown;
     }
 
-    // Terrain disengage. Unlike BreakOff this is condition-based (lasts as long
-    // as the terrain threat persists) and deliberately leaves the target and
-    // the player-window break-off budget (_engageBreakAt / _nextBreakAllowed /
-    // _breakOffUntil) untouched.
-    void EnterTerrainEvade()
+    // Shared patrol-waypoint cycling, reused by Patrol and the LoseInterest
+    // wander: pick a fresh point once the current one is reached or times out.
+    void RefreshPatrolWaypoint()
     {
-        _state = AIState.TerrainEvade;
-        _evadeMinUntil = Time.fixedTime + Mathf.Max(Stats.GcaEvadeMinTime, 0f);
+        var reachSq = Stats.PatrolWaypointReachDistance * Stats.PatrolWaypointReachDistance;
+        if ((_patrolWaypoint - _transform.position).sqrMagnitude <= reachSq ||
+            Time.fixedTime >= _patrolWaypointDeadline)
+        {
+            PickNewPatrolWaypoint();
+        }
     }
 
-    // --- Targeting ----------------------------------------------------------
+    // --- Targeting ---
 
     void UpdateTargetLoss()
     {
-        if (_target == null || _state == AIState.Patrolling) { _targetOutOfRangeSince = -1f; return; }
-        // Locked on whoever shot us: never drop the attacker by range.
+        if (_target == null || _state == AIState.Patrol) { _targetOutOfRangeSince = -1f; return; }
         if (RetaliationActive) { _targetOutOfRangeSince = -1f; return; }
-        if (_target.IsDead) return; // handled in RefreshTarget/UpdateState
+        if (_target.IsDead) return;
 
         var distSq = (_target.transform.position - _transform.position).sqrMagnitude;
         if (distSq <= Stats.LoseRange * Stats.LoseRange)
@@ -825,26 +763,22 @@ public class PlaneAIController : MonoBehaviour
                Time.fixedTime - _targetOutOfRangeSince >= Stats.LoseTargetTime;
     }
 
+    // Selection only. The decision to commit or peel off lives in the FSM.
     void RefreshTarget(bool force)
     {
-        // Locked on whoever shot us: ignore the player-target bias and the
-        // closest-hostile switch. A killed/expired attacker falls through to
-        // normal selection on the next pass.
+        // Locked on whoever shot us: ignore the bias and the closest-hostile
+        // switch. A killed/expired attacker falls through to normal selection.
         if (RetaliationActive)
         {
             SetTarget(_retaliateTarget);
             return;
         }
 
-        // Distracted: ignore everything and wander (handled by the Patrolling
-        // state, which keeps picking patrol waypoints while _target is null).
-        if (Distracted)
-        {
-            SetTarget(null);
+        // Suppress selection for the whole LoseInterest window so it actually
+        // stays distracted (the state entry already dropped the target).
+        if (_state == AIState.Disengage && _disengageReason == DisengageReason.LoseInterest)
             return;
-        }
 
-        // Drop a dead/destroyed or run-away target.
         if (_target != null && (_target.IsDead || (!force && TargetLostByRange())))
         {
             SetTarget(null);
@@ -854,10 +788,9 @@ public class PlaneAIController : MonoBehaviour
         var myPos = _transform.position;
 
         // The human player is scored as PlayerTargetBias times farther than it
-        // really is, so the AI prefers other AI (allies) and only commits to
-        // the player when it is the only hostile or vastly closer. The
-        // AcquireRange gate below still uses the TRUE distance, so a lone
-        // player is acquired exactly as before.
+        // really is, so the AI prefers allies and only commits to the player
+        // when it is the only hostile or vastly closer. The AcquireRange gate
+        // below still uses the TRUE distance.
         var playerScoreMul = Stats.PlayerTargetBias * Stats.PlayerTargetBias;
 
         PlaneHealth best = null;
@@ -867,9 +800,6 @@ public class PlaneAIController : MonoBehaviour
         {
             if (ph == null || ph == _health || ph.IsDead) continue;
             if (!_health.IsHostileTo(ph)) continue;
-            // Crowd cap: a hostile already saturated with attackers is
-            // invisible to acquisition AND to the switch logic, so the overflow
-            // spreads to other hostiles or wanders instead of dogpiling.
             if (TargetSlotFull(ph)) continue;
             var dSq = (ph.transform.position - myPos).sqrMagnitude;
             var scoreSq = ph.Faction == PlaneFaction.Player ? dSq * playerScoreMul : dSq;
@@ -885,34 +815,16 @@ public class PlaneAIController : MonoBehaviour
 
         var acquireSq = Stats.AcquireRange * Stats.AcquireRange;
 
-        // No target: only adopt one inside AcquireRange of where we ARE now
-        // (TRUE distance — the bias never makes a sole player unreachable).
+        // No target: adopt one inside AcquireRange of where we ARE now (TRUE
+        // distance). Whether to commit or wander is the Patrol state's call.
         if (_target == null)
         {
-            if (force || bestDistSq <= acquireSq)
-            {
-                // Don't always commit: on a failed roll, wander off distracted
-                // instead of engaging, so the swarm looks confused/scattered.
-                if (Stats.EngageChance < 1f && Random.value > Stats.EngageChance)
-                    StartDistraction();
-                else
-                    SetTarget(best);
-            }
+            if (force || bestDistSq <= acquireSq) SetTarget(best);
             return;
         }
 
-        // Already chasing: small per-refresh chance to simply lose interest and
-        // wander off (acts dumb, thins the pursuit). Retaliation suppresses it.
-        if (Stats.DistractionChance > 0f && !RetaliationActive &&
-            Random.value < Stats.DistractionChance)
-        {
-            StartDistraction();
-            return;
-        }
-
-        // Otherwise keep it, but switch to a clearly-better (bias-weighted)
-        // hostile so it won't ditch an ally just because the player drifted
-        // slightly closer.
+        // Already chasing: switch only to a clearly-better (bias-weighted)
+        // hostile so it won't ditch an ally for a slightly-closer player.
         if (best == _target) return;
         var curDistSq = (_target.transform.position - myPos).sqrMagnitude;
         var curScoreSq = _target.Faction == PlaneFaction.Player
@@ -933,10 +845,10 @@ public class PlaneAIController : MonoBehaviour
         ResetLagBuffer(t);
     }
 
-    // --- Crowd cap + distraction -------------------------------------------
+    // --- Crowd cap ---
 
-    // Wipe the shared count before every play session, so it survives
-    // "Enter Play Mode" with domain reload disabled (no ghost attackers).
+    // Wipe the shared count before every play session so it survives "Enter
+    // Play Mode" with domain reload disabled (no ghost attackers).
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetCrowdRegistry() => s_attackerCount.Clear();
 
@@ -958,9 +870,8 @@ public class PlaneAIController : MonoBehaviour
             s_attackerCount[t] = AttackerCount(t) + 1;
     }
 
-    // Is this hostile already at its crowd cap (counting only OTHER AIs, so we
-    // never evict ourselves off a target we already hold)? Player-faction
-    // planes use MaxAttackersOnPlayer; everyone else MaxAttackersPerTarget.
+    // Is this hostile at its crowd cap? Counts only OTHER AIs (we discount our
+    // own slot) so we never evict ourselves off a target we already hold.
     bool TargetSlotFull(PlaneHealth t)
     {
         if (t == null) return false;
@@ -969,18 +880,11 @@ public class PlaneAIController : MonoBehaviour
             : Stats.MaxAttackersPerTarget;
         if (cap <= 0) return false; // unlimited
         var others = AttackerCount(t);
-        if (_countedTarget == t) others--; // discount our own slot
+        if (_countedTarget == t) others--;
         return others >= cap;
     }
 
-    void StartDistraction()
-    {
-        SetTarget(null);
-        _distractedUntil = Time.fixedTime +
-            Random.Range(Stats.DistractedDurationMin, Stats.DistractedDurationMax);
-    }
-
-    // --- Gun aim-assist (genuinely dangerous when it gets position) --------
+    // --- Gun aim-assist ---
 
     void UpdateFiring()
     {
@@ -988,7 +892,7 @@ public class PlaneAIController : MonoBehaviour
 
         var wantsFire = false;
 
-        if (_state == AIState.Pursuing && _target != null)
+        if (_state == AIState.Engage && _target != null)
         {
             var targetPos = _target.transform.position;
             var toTarget = targetPos - _transform.position;
@@ -1008,12 +912,10 @@ public class PlaneAIController : MonoBehaviour
 
                 if (_gunLockTime >= Stats.GunLockAcquireTime)
                 {
-                    // The gun is HITSCAN (PlaneShooter does an instant
-                    // Physics.Raycast), so the solution must point at the
-                    // target's CURRENT position from the MUZZLE — leading a
-                    // crossing target throws an instant bullet meters ahead of
-                    // it. GunLeadTime is only a tiny compensation for the
-                    // sub-step between this solve and the shot.
+                    // The gun is HITSCAN, so the solution points at the
+                    // target's CURRENT position from the muzzle — leading a
+                    // crossing target throws an instant bullet ahead of it.
+                    // GunLeadTime only compensates the solve→shot sub-step.
                     var muzzle = _transform.position + _transform.forward * _shooter.MuzzleOffsetZ;
                     var aimPoint = targetPos + EstimateTargetVelocity() * Stats.GunLeadTime;
                     var desired = (aimPoint - muzzle).normalized;
@@ -1021,21 +923,16 @@ public class PlaneAIController : MonoBehaviour
                     var maxRad = Stats.GunLockMaxCorrectionDeg * Mathf.Deg2Rad;
                     var solution = Vector3.RotateTowards(_transform.forward, desired, maxRad, 0f);
 
-                    // The decision to fire is made on the UNDEGRADED solution:
-                    // the AI shoots when it genuinely has the target lined up
-                    // (and terrain isn't masking it). Keep it decoupled from the
-                    // noised shot below so the gate stays clean — it fires on a
-                    // true solution and the small residual spray decides spread,
-                    // not whether it shoots at all.
+                    // Fire on the UNDEGRADED solution so the gate stays clean:
+                    // it shoots when genuinely lined up; the residual spray
+                    // below decides spread, not whether it shoots.
                     var aimToTarget = (targetPos - muzzle).normalized;
                     wantsFire = Vector3.Dot(solution.normalized, aimToTarget) > coneCos
                                 && HasShotLineOfSight(muzzle, targetPos, dist);
 
-                    // The SHOT carries a SMALL residual spray (GunAimNoiseDeg),
-                    // scaled up a little with range / off-tail aspect, so bursts
-                    // aren't robot-perfect but still land on a target it has
-                    // lined up. Fast jitter so a burst spreads slightly instead
-                    // of walking on as one coherent block.
+                    // Small residual spray, scaled up with range / off-tail
+                    // aspect, jittered fast so a burst spreads instead of
+                    // walking on as one coherent block.
                     var rangeFrac = Mathf.Clamp01(dist / Mathf.Max(Stats.FireRange, 0.0001f));
                     var aspectErr = 1f - Mathf.Clamp01(noseDot);
                     var rangeScale = Mathf.Lerp(Stats.GunAimNoisePointBlankScale, 1f, rangeFrac);
@@ -1098,9 +995,9 @@ public class PlaneAIController : MonoBehaviour
 
     static readonly RaycastHit[] _losHits = new RaycastHit[16];
 
-    // Does the muzzle have a clear line to the target, or is terrain (or
-    // another body) masking it? Mirrors PlaneShooter's hitscan: the shot is
-    // only worth taking if the FIRST thing the ray meets is the target.
+    // Mirrors PlaneShooter's hitscan: the shot is only worth taking if the
+    // first body the ray meets is the target (else terrain/another plane
+    // masks it).
     bool HasShotLineOfSight(Vector3 muzzle, Vector3 targetPos, float dist)
     {
         var to = targetPos - muzzle;
@@ -1118,7 +1015,7 @@ public class PlaneAIController : MonoBehaviour
         {
             var h = _losHits[i];
             var ph = h.collider.GetComponentInParent<PlaneHealth>();
-            if (ph == _health) continue; // ignore our own airframe
+            if (ph == _health) continue;
             anyBlocker = true;
             if (h.distance < nearest)
             {
@@ -1127,12 +1024,10 @@ public class PlaneAIController : MonoBehaviour
             }
         }
 
-        // Nothing in the way, or the closest body the ray meets IS the
-        // target — clear to shoot. Terrain/anything else first = masked.
         return !anyBlocker || nearestIsTarget;
     }
 
-    // --- Lag buffer ---------------------------------------------------------
+    // --- Lag buffer ---
 
     Vector3 EstimateTargetVelocity()
     {
@@ -1178,45 +1073,42 @@ public class PlaneAIController : MonoBehaviour
         return _lagPositions[oldestIdx];
     }
 
-    // --- Patrol -------------------------------------------------------------
+    // --- Patrol ---
 
     void PickNewPatrolWaypoint()
     {
         var horiz = Random.insideUnitCircle * Stats.PatrolRadius;
         var dy = Random.Range(-Stats.PatrolVerticalRange, Stats.PatrolVerticalRange);
         _patrolWaypoint = _anchor + new Vector3(horiz.x, dy, horiz.y);
-        // Pull the waypoint inside the map first (before the floor clamp, so
-        // the route is sampled at the corrected XZ) — otherwise a spawn anchor
-        // near the edge throws patrol legs into the hard turn-back.
+        // Clamp inside the map BEFORE the floor sample so the route is sampled
+        // at the corrected XZ (a spawn near the edge would otherwise throw
+        // patrol legs into the hard turn-back).
         var boundary = MapBoundary.Instance;
         if (boundary != null)
             _patrolWaypoint = boundary.ClampInsideXZ(_patrolWaypoint, Stats.BoundaryClearance);
-        // Lift above the worst floor along the WHOLE route, not just the
-        // endpoint, so the straight leg doesn't fly through a hill.
         var floor = WorstFloorAlong(_transform.position, _patrolWaypoint,
             Stats.GcaRouteProbeCount);
         if (_patrolWaypoint.y < floor) _patrolWaypoint.y = floor;
         _patrolWaypointDeadline = Time.fixedTime + Stats.PatrolWaypointTimeout;
     }
 
-    // --- Gizmos -------------------------------------------------------------
+    // --- Gizmos ---
 
     void OnDrawGizmos()
     {
         var playing = Application.isPlaying;
         Color stateColor;
-        if (playing && _state == AIState.TerrainEvade) stateColor = Color.magenta;
-        else if (playing && _state == AIState.BreakOff) stateColor = Color.yellow;
-        else if (playing && _state == AIState.Pursuing) stateColor = Color.red;
+        if (playing && _state == AIState.Disengage) stateColor = Color.yellow;
+        else if (playing && _state == AIState.Engage) stateColor = Color.red;
         else stateColor = Color.green;
         Gizmos.color = stateColor;
         DrawArrow(transform.position, transform.forward, 50f);
 
         if (!playing || Stats == null || !Stats.GcaEnabled) return;
 
-        // Predicted ground track, coloured by the live terrain threat
-        // (green -> amber -> red), with a marker at the recoverable climb-out
-        // point. Use this to confirm the threat ramps BEFORE impact.
+        // Predicted ground track coloured by the live threat (green→amber→red)
+        // with a marker at the climb-out point — confirms the threat ramps
+        // BEFORE impact.
         var threatColor = _threat < 0.5f
             ? Color.Lerp(Color.green, Color.yellow, _threat * 2f)
             : Color.Lerp(Color.yellow, Color.red, (_threat - 0.5f) * 2f);
@@ -1242,9 +1134,8 @@ public class PlaneAIController : MonoBehaviour
         Gizmos.DrawLine(tip, back - side * (length * 0.12f));
     }
 
-    // Firing envelope, shown when the plane is selected: the cone is
-    // FireConeDeg half-angle and FireRange long, with the FireMinDistance
-    // dead zone marked near the nose.
+    // Firing envelope (when selected): FireConeDeg half-angle, FireRange long,
+    // with the FireMinDistance dead zone near the nose.
     void OnDrawGizmosSelected()
     {
         if (Stats == null) return;
@@ -1259,23 +1150,20 @@ public class PlaneAIController : MonoBehaviour
         var minD = Mathf.Max(Stats.FireMinDistance, 0f);
         var tan = Mathf.Tan(half);
 
-        // Cone body + end cap at FireRange.
         Gizmos.color = new Color(1f, 0.55f, 0.1f, 0.9f);
         var capCentre = o + fwd * range;
         var capR = range * tan;
         DrawRing(capCentre, right, up, capR, 40);
-        Gizmos.DrawLine(o, capCentre); // boresight / range
+        Gizmos.DrawLine(o, capCentre);
         for (int i = 0; i < 8; i++)
         {
             var a = i / 8f * Mathf.PI * 2f;
             Gizmos.DrawLine(o, capCentre + (right * Mathf.Cos(a) + up * Mathf.Sin(a)) * capR);
         }
 
-        // FireMinDistance dead zone.
         Gizmos.color = new Color(1f, 0.25f, 0.2f, 0.8f);
         DrawRing(o + fwd * minD, right, up, Mathf.Max(minD * tan, 0.001f), 24);
 
-        // Acquire range, for context (faint sphere).
         Gizmos.color = new Color(0.25f, 0.8f, 1f, 0.25f);
         Gizmos.DrawWireSphere(o, Stats.AcquireRange);
     }

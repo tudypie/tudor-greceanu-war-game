@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(Get-ChildItem *)"
+      "Bash(Get-ChildItem *)",
+      "Bash(xargs grep -i \"bf.*109\\\\|fw.*190\\\\|il-?2\\\\|lagg\\\\|hs-?129\")"
     ]
   }
 }

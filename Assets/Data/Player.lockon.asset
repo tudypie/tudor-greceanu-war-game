@@ -13,11 +13,11 @@ MonoBehaviour:
   m_Name: Player.lockon
   m_EditorClassIdentifier: 
   BoxWidth: 140
-  BoxHeight: 100
+  BoxHeight: 120
   ReticleSensitivity: {x: 1, y: 1}
   InvertReticleY: 0
-  ReticleRangeX: 0.36
-  ReticleRangeY: 0.32
+  ReticleRangeX: 0.32
+  ReticleRangeY: 0.3
   ReticleRecenterPerSecond: 0
   AimConvergeDistance: 350
   CrosshairSize: 12

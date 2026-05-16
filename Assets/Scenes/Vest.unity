@@ -411,21 +411,21 @@ MonoBehaviour:
   Seed: 84832
   SizeX: 3000
   SizeZ: 3000
-  HeightMetres: 450
+  HeightMetres: 750
   Resolution: 4097
   BaseElevation: 60
-  ContinentalRelief: 130
+  ContinentalRelief: 110
   ContinentalWavelength: 4200
-  HillRelief: 130
+  HillRelief: 120
   HillWavelength: 850
   HillOctaves: 4
   HillLacunarity: 2
   HillGain: 0.5
-  EnableCarpathians: 0
-  RidgeRelief: 550
-  RidgeWavelength: 1000
-  BandWidth: 2100
-  ArcCurvature: 0.22
+  EnableCarpathians: 1
+  RidgeRelief: 420
+  RidgeWavelength: 1100
+  BandWidth: 700
+  ArcCurvature: 0.12
   WarpStrength: 140
   WarpWavelength: 1800
   EnableRiver: 1
@@ -443,11 +443,11 @@ MonoBehaviour:
   GrassLayer: {fileID: 8574412962073106934, guid: f862b1383e7d1e747835de017328d247, type: 2}
   RockLayer: {fileID: 8574412962073106934, guid: cd8ce7e73b1b630488487ba7915c6e02, type: 2}
   SnowLayer: {fileID: 8574412962073106934, guid: 267198d360015b44c80dd20b0786726e, type: 2}
-  GrassRockAltitude: 380
-  GrassRockBlend: 60
-  RockSnowAltitude: 600
-  RockSnowBlend: 70
-  CliffAngle: 34
+  GrassRockAltitude: 400
+  GrassRockBlend: 90
+  RockSnowAltitude: 750
+  RockSnowBlend: 50
+  CliffAngle: 32
   CliffBlend: 12
 --- !u!1001 &1354303056
 PrefabInstance:
