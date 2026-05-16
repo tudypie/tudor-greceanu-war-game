@@ -11,9 +11,17 @@ public class PlaneCameraFollow : MonoBehaviour
 
     public Key FirstPersonToggleKey = Key.C;
 
+    PlaneLockOn _lockOn;
     bool _firstPerson;
-    float _yawOffset;
-    float _pitchOffset;
+    float _yaw;
+    float _pitch;
+    float _panYaw;
+    float _panPitch;
+    bool _freeLooking;
+
+    // True while the player holds RMB to look around. PlaneLockOn freezes the
+    // reticle/aim during this so the gun doesn't slew with the camera.
+    public bool IsFreeLooking => _freeLooking;
 
     void Start()
     {
@@ -23,6 +31,7 @@ public class PlaneCameraFollow : MonoBehaviour
             Debug.LogError($"{nameof(PlaneCameraFollow)} on {name} has no Stats assigned.", this);
             return;
         }
+        _lockOn = GetComponent<PlaneLockOn>();
         if (Camera != null) Camera.transform.SetParent(null);
         if (Stats.LockCursor)
         {
@@ -30,9 +39,10 @@ public class PlaneCameraFollow : MonoBehaviour
             Cursor.visible = false;
         }
         _firstPerson = Stats.StartInFirstPerson;
-        // Start parked behind the plane's initial heading; from here on the
-        // orbit is world-fixed and only the player moves it.
-        _yawOffset = HeadingFromForward(_transform.forward, 0f);
+        // Park behind the plane's initial heading; from here the chase cam
+        // auto-trails the plane instead of being mouse-driven.
+        _yaw = HeadingFromForward(_transform.forward, 0f);
+        _pitch = 0f;
     }
 
     void LateUpdate()
@@ -46,19 +56,56 @@ public class PlaneCameraFollow : MonoBehaviour
         if (_firstPerson)
         {
             // Rigidly attached to the cockpit; the view turns with the plane,
-            // unlike the world-fixed third-person orbit below.
+            // unlike the auto-trailing third-person orbit below.
             var fpCam = Camera.transform;
             fpCam.position = _transform.TransformPoint(Stats.FirstPersonOffset);
             fpCam.rotation = _transform.rotation;
             return;
         }
 
-        ReadMouseLook();
+        // The chase cam auto-trails: it swings around to sit behind the
+        // plane's heading and matches a fraction of its climb, then leans
+        // toward wherever the free-aim reticle is pushed so the target
+        // stays framed.
+        var fwd = _transform.forward;
+        var desiredYaw = HeadingFromForward(fwd, _yaw);
+        var desiredPitch = Mathf.Clamp(
+            -Mathf.Asin(Mathf.Clamp(fwd.y, -1f, 1f)) * Mathf.Rad2Deg * Stats.FollowPitchFactor,
+            Stats.MinPitch, Stats.MaxPitch);
 
-        // The orbit is fixed in world space and driven purely by the player.
-        // The camera does NOT rotate with the plane's heading/pitch/roll; it
-        // only tracks the plane's position so the plane stays framed.
-        var orbit = Quaternion.Euler(_pitchOffset, _yawOffset, 0f);
+        var dt = Time.deltaTime;
+        var yawA = 1f - Mathf.Exp(-Stats.FollowYawSmoothing * dt);
+        var pitchA = 1f - Mathf.Exp(-Stats.FollowPitchSmoothing * dt);
+        _yaw += Mathf.DeltaAngle(_yaw, desiredYaw) * yawA;
+        _pitch = Mathf.Lerp(_pitch, desiredPitch, pitchA);
+
+        // Hold RMB to pan a free-look offset on top of the auto-trail;
+        // releasing eases it back to zero.
+        var mouse = Mouse.current;
+        _freeLooking = mouse != null && mouse.rightButton.isPressed;
+        if (_freeLooking)
+        {
+            var d = mouse.delta.ReadValue();
+            _panYaw += d.x * Stats.FreeLookSensitivity.x;
+            var pitchDelta = d.y * Stats.FreeLookSensitivity.y;
+            _panPitch += Stats.InvertFreeLookY ? pitchDelta : -pitchDelta;
+            _panPitch = Mathf.Clamp(_panPitch, Stats.MinPitch, Stats.MaxPitch);
+        }
+        else
+        {
+            var rk = 1f - Mathf.Exp(-Stats.FreeLookReturnSmoothing * dt);
+            _panYaw = Mathf.Lerp(_panYaw, 0f, rk);
+            _panPitch = Mathf.Lerp(_panPitch, 0f, rk);
+        }
+
+        // Aim lean is suppressed while free-looking since the reticle is frozen.
+        var lean = (!_freeLooking && _lockOn != null) ? _lockOn.AimOffsetNormalized : Vector2.zero;
+        var leanYaw = lean.x * Stats.AimLeanYaw;
+        var leanPitch = -lean.y * Stats.AimLeanPitch;
+
+        var orbit = Quaternion.Euler(
+            _pitch + _panPitch + leanPitch,
+            _yaw + _panYaw + leanYaw, 0f);
 
         var cam = Camera.transform;
         cam.position = _transform.position + orbit * Stats.FollowOffset;
@@ -69,20 +116,6 @@ public class PlaneCameraFollow : MonoBehaviour
         {
             cam.rotation = Quaternion.LookRotation(toTarget, Vector3.up);
         }
-    }
-
-    void ReadMouseLook()
-    {
-        var mouse = Mouse.current;
-        if (mouse == null) return;
-
-        var delta = mouse.delta.ReadValue();
-        if (delta.sqrMagnitude <= 0.0001f) return;
-
-        _yawOffset += delta.x * Stats.MouseSensitivity.x;
-        var pitchDelta = delta.y * Stats.MouseSensitivity.y;
-        _pitchOffset += Stats.InvertY ? pitchDelta : -pitchDelta;
-        _pitchOffset = Mathf.Clamp(_pitchOffset, Stats.MinPitch, Stats.MaxPitch);
     }
 
     static float HeadingFromForward(Vector3 forward, float fallbackDeg)
