@@ -14,15 +14,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   PitchGain: 2.5
   YawGain: 1.5
-  RollGain: 3.5
-  ReactionTime: 0.15
+  RollGain: 2
+  ReactionTime: 0.3
   AcquireRange: 900
   LoseRange: 1500
   LoseTargetTime: 6
   TargetRefreshInterval: 0.5
   TargetSwitchHysteresis: 0.75
+  PlayerTargetBias: 6
   LagSeconds: 0.08
-  SteerLeadTime: 0.5
+  SteerLeadTime: 0.25
   PatrolRadius: 350
   PatrolVerticalRange: 70
   PatrolWaypointReachDistance: 60

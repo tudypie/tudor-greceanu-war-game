@@ -265,7 +265,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9a3f7b1e4c2d8e6f5a4b3c2d1e0f9876, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  MuzzlePoints: []
+  MuzzlePoints:
+  - {fileID: 1505873140348392818}
+  - {fileID: 7567551961661041111}
   Trigger: 0
   Stats: {fileID: 11400000, guid: b1b2c3d4e5f6789012345678901b0003, type: 2}
   UseAimDirection: 0
@@ -297,6 +299,7 @@ MonoBehaviour:
   Stats: {fileID: 11400000, guid: b1b2c3d4e5f6789012345678901b0006, type: 2}
   Camera: {fileID: 6481807303784503014}
   CameraTarget: {fileID: 7180359115540853827}
+  FirstPersonToggleKey: 17
 --- !u!114 &5464723796544446838
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -452,7 +455,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a3f7c1d92be84456ab0d2f6e7c1a9d40, type: 3}
   m_Name: 
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: 
   TopMargin: 16
   LeftMargin: 16
   PanelWidth: 188
@@ -469,8 +472,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b7e3c1a9d2f04e6685a1c3b5d7e9f102, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   FontSize: 26
   TopMargin: 150
   FlashHz: 4

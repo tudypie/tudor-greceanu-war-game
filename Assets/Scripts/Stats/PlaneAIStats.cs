@@ -21,6 +21,8 @@ public class PlaneAIStats : ScriptableObject
     public float TargetRefreshInterval = 0.5f;
     [Tooltip("A new candidate must be this fraction of the current target's distance (or closer) to steal the lock. <1 adds hysteresis.")]
     public float TargetSwitchHysteresis = 0.75f;
+    [Tooltip("Multiplier on the human player's effective distance during target selection. >1 makes the AI prefer other AI (allies) over the player; it only commits to the player when the player is the only hostile or vastly closer. 1 = no bias. Overridden while retaliating.")]
+    public float PlayerTargetBias = 1f;
 
     [Header("Retaliation (turn on whoever shoots it)")]
     [Tooltip("When hit by a hostile, immediately drop everything and pursue the attacker — even if it was patrolling, mid break-off, or the attacker is beyond AcquireRange.")]

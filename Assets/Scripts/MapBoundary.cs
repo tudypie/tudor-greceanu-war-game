@@ -6,21 +6,28 @@ using UnityEngine;
 // the field centre and drag the Size out to taste; the red gizmo box is the
 // hard edge.
 //
-// Outside the box every plane (player + AI) has its roll & yaw overridden by
-// PlaneFlightModel and is banked back toward the centre until it is
-// RecoverMargin back inside. The AI also eases back in on its own before the
-// hard limit (PlaneAIController), so it doesn't grind against the edge.
-// Pitch is never touched — vertical limits are the service ceiling's job.
+// The box does two independent jobs:
+//   * Its X/Z EDGES are the horizontal playable-area limit: outside them
+//     every plane (player + AI) has its roll & yaw overridden by
+//     PlaneFlightModel and is banked back toward the centre until it is
+//     RecoverMargin back inside (the "leaving combat area" turn-back). The AI
+//     also eases back in on its own before the hard edge (PlaneAIController).
+//   * Its TOP (position.y + Size.y/2) is the hard ALTITUDE ceiling: climb
+//     above it and PlaneFlightModel forces the nose down (the service-ceiling
+//     mush + altitude HUD), exactly as if it were PlaneFlightStats.
+//     ServiceCeiling — it is NOT treated as "leaving combat area". When a
+//     MapBoundary exists its top REPLACES the flight-stats ServiceCeiling.
+// The box bottom is still cosmetic; the low limit is the terrain floor.
 //
 // One per scene; planes find it through Instance. The box is axis-aligned in
-// world space (the turn-back maths uses world X/Z), so rotating this object
-// has no effect — only its position and Size matter. With no MapBoundary in
-// the scene the whole feature is simply inert.
+// world space (the maths uses world X/Z and Y), so rotating this object has
+// no effect — only its position and Size matter. With no MapBoundary in the
+// scene the whole feature is inert (the flight-stats ServiceCeiling applies).
 public class MapBoundary : MonoBehaviour
 {
     public static MapBoundary Instance { get; private set; }
 
-    [Tooltip("Box size in world units, centred on this object's position. Only X and Z bound the planes; Y is just the gizmo height.")]
+    [Tooltip("Box size in world units, centred on this object's position. X and Z are the horizontal turn-back limit; the box TOP (position.y + Size.y/2) is the hard altitude ceiling (forced nose-down). The bottom is cosmetic.")]
     public Vector3 Size = new Vector3(2800f, 600f, 2800f);
 
     [Tooltip("Band (world units) inside the edge where the player warning arms and the AI starts easing back in.")]
@@ -47,6 +54,10 @@ public class MapBoundary : MonoBehaviour
     }
 
     public Vector3 Center => transform.position;
+
+    // Top of the box: the hard altitude ceiling. When a MapBoundary is in the
+    // scene this replaces PlaneFlightStats.ServiceCeiling for every plane.
+    public float TopY => transform.position.y + Mathf.Max(Size.y, 0.02f) * 0.5f;
 
     float HalfX => Mathf.Max(Size.x, 0.02f) * 0.5f;
     float HalfZ => Mathf.Max(Size.z, 0.02f) * 0.5f;

@@ -21,7 +21,7 @@ using UnityEngine;
 //      guns cold, with hysteresis.
 //
 // Ceiling: the same idea, inverted. The AI clamps its aim point below
-// (PlaneFlightStats.ServiceCeiling - CeilingClearance) and adds a soft
+// (PlaneFlightModel.EffectiveServiceCeiling - CeilingClearance) and adds a soft
 // DOWNWARD bias within that band, so it levels off on its own instead of
 // porpoising where PlaneFlightModel would force its nose down anyway. The
 // hard physical limit itself is enforced by PlaneFlightModel for every plane.
@@ -49,6 +49,16 @@ public class PlaneAIController : MonoBehaviour
     PlaneHealth _target;
     float _nextTargetRefresh;
     float _targetOutOfRangeSince = -1f;
+
+    // Retaliation: when shot by a hostile, lock onto the attacker for
+    // RetaliationDuration seconds — overrides the player-target bias, ignores
+    // range loss, and skips the deliberate break-off (terrain safety still
+    // wins). Each fresh hit pushes the deadline out.
+    PlaneHealth _retaliateTarget;
+    float _retaliateUntil = -1f;
+    bool RetaliationActive =>
+        _retaliateTarget != null && !_retaliateTarget.IsDead &&
+        Time.fixedTime < _retaliateUntil;
 
     // Deliberate break-off scheduling.
     float _engageBreakAt;
@@ -96,6 +106,7 @@ public class PlaneAIController : MonoBehaviour
         _model = GetComponent<PlaneFlightModel>();
         _shooter = GetComponent<PlaneShooter>();
         _health = GetComponent<PlaneHealth>();
+        if (_health != null) _health.DamagedBy += OnDamagedBy;
         _anchor = _transform.position;
         _aimNoiseSeed = Random.value * 1000f;
         if (Stats == null)
@@ -106,6 +117,24 @@ public class PlaneAIController : MonoBehaviour
         CacheTerrain();
         PickNewPatrolWaypoint();
         RefreshTarget(force: true);
+    }
+
+    void OnDestroy()
+    {
+        if (_health != null) _health.DamagedBy -= OnDamagedBy;
+    }
+
+    // Turn on whoever shoots us (covers the player) and stay locked for
+    // RetaliationDuration. Runs from PlaneHealth.TakeDamage — touches fields
+    // only; the actual state transition happens next FixedUpdate.
+    void OnDamagedBy(float amount, PlaneHealth attacker)
+    {
+        if (Stats == null || !Stats.RetaliateWhenShot) return;
+        if (attacker == null || attacker == _health || attacker.IsDead) return;
+        if (_health == null || !_health.IsHostileTo(attacker)) return;
+        _retaliateTarget = attacker;
+        _retaliateUntil = Time.fixedTime + Stats.RetaliationDuration;
+        SetTarget(attacker);
     }
 
     void CacheTerrain()
@@ -346,11 +375,12 @@ public class PlaneAIController : MonoBehaviour
     }
 
     // Soft cap the AI keeps below: CeilingClearance under the flight model's
-    // hard ServiceCeiling. MaxValue (no clamp) if there is no flight stats.
+    // EFFECTIVE hard ceiling (the MapBoundary box top when one is in the
+    // scene, else the flight-stats ServiceCeiling). MaxValue if no model.
     float CeilingCapY()
     {
-        if (_model == null || _model.Stats == null) return float.MaxValue;
-        return _model.Stats.ServiceCeiling - Stats.CeilingClearance;
+        if (_model == null) return float.MaxValue;
+        return _model.EffectiveServiceCeiling - Stats.CeilingClearance;
     }
 
     // Mirror of ComputeAltitudeSoftBias: a downward bias that ramps in as the
@@ -609,6 +639,16 @@ public class PlaneAIController : MonoBehaviour
 
     void UpdateState()
     {
+        // Retaliation: drop patrol or cut a deliberate break-off short and
+        // re-engage the attacker now. TerrainEvade still owns the airframe and
+        // re-engages on its own terms once the terrain threat clears.
+        if (RetaliationActive && _target != null &&
+            (_state == AIState.Patrolling || _state == AIState.BreakOff))
+        {
+            EnterPursuing();
+            return;
+        }
+
         switch (_state)
         {
             case AIState.Patrolling:
@@ -639,8 +679,10 @@ public class PlaneAIController : MonoBehaviour
                     EnterTerrainEvade();
                     return;
                 }
-                // Scheduled, deliberate break-off (gated by the cooldown).
-                if (Time.fixedTime >= _engageBreakAt && Time.fixedTime >= _nextBreakAllowed)
+                // Scheduled, deliberate break-off (gated by the cooldown;
+                // suppressed while retaliating so it stays on its attacker).
+                if (!RetaliationActive &&
+                    Time.fixedTime >= _engageBreakAt && Time.fixedTime >= _nextBreakAllowed)
                 {
                     EnterBreakOff();
                     return;
@@ -738,6 +780,8 @@ public class PlaneAIController : MonoBehaviour
     void UpdateTargetLoss()
     {
         if (_target == null || _state == AIState.Patrolling) { _targetOutOfRangeSince = -1f; return; }
+        // Locked on whoever shot us: never drop the attacker by range.
+        if (RetaliationActive) { _targetOutOfRangeSince = -1f; return; }
         if (_target.IsDead) return; // handled in RefreshTarget/UpdateState
 
         var distSq = (_target.transform.position - _transform.position).sqrMagnitude;
@@ -759,6 +803,15 @@ public class PlaneAIController : MonoBehaviour
 
     void RefreshTarget(bool force)
     {
+        // Locked on whoever shot us: ignore the player-target bias and the
+        // closest-hostile switch. A killed/expired attacker falls through to
+        // normal selection on the next pass.
+        if (RetaliationActive)
+        {
+            SetTarget(_retaliateTarget);
+            return;
+        }
+
         // Drop a dead/destroyed or run-away target.
         if (_target != null && (_target.IsDead || (!force && TargetLostByRange())))
         {
@@ -768,15 +821,25 @@ public class PlaneAIController : MonoBehaviour
         var all = Object.FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
         var myPos = _transform.position;
 
+        // The human player is scored as PlayerTargetBias times farther than it
+        // really is, so the AI prefers other AI (allies) and only commits to
+        // the player when it is the only hostile or vastly closer. The
+        // AcquireRange gate below still uses the TRUE distance, so a lone
+        // player is acquired exactly as before.
+        var playerScoreMul = Stats.PlayerTargetBias * Stats.PlayerTargetBias;
+
         PlaneHealth best = null;
+        var bestScoreSq = float.MaxValue;
         var bestDistSq = float.MaxValue;
         foreach (var ph in all)
         {
             if (ph == null || ph == _health || ph.IsDead) continue;
             if (!_health.IsHostileTo(ph)) continue;
             var dSq = (ph.transform.position - myPos).sqrMagnitude;
-            if (dSq < bestDistSq)
+            var scoreSq = ph.Faction == PlaneFaction.Player ? dSq * playerScoreMul : dSq;
+            if (scoreSq < bestScoreSq)
             {
+                bestScoreSq = scoreSq;
                 bestDistSq = dSq;
                 best = ph;
             }
@@ -786,19 +849,23 @@ public class PlaneAIController : MonoBehaviour
 
         var acquireSq = Stats.AcquireRange * Stats.AcquireRange;
 
-        // No target: only adopt one inside AcquireRange of where we ARE now.
+        // No target: only adopt one inside AcquireRange of where we ARE now
+        // (TRUE distance — the bias never makes a sole player unreachable).
         if (_target == null)
         {
             if (force || bestDistSq <= acquireSq) SetTarget(best);
             return;
         }
 
-        // Already chasing: keep it, but switch to a clearly-closer hostile so
-        // the AI mostly fights whatever is nearest.
+        // Already chasing: keep it, but switch to a clearly-better (bias-
+        // weighted) hostile so it won't ditch an ally just because the player
+        // drifted slightly closer.
         if (best == _target) return;
-        var currentDistSq = (_target.transform.position - myPos).sqrMagnitude;
+        var curDistSq = (_target.transform.position - myPos).sqrMagnitude;
+        var curScoreSq = _target.Faction == PlaneFaction.Player
+            ? curDistSq * playerScoreMul : curDistSq;
         if (bestDistSq <= acquireSq &&
-            bestDistSq < currentDistSq * Stats.TargetSwitchHysteresis * Stats.TargetSwitchHysteresis)
+            bestScoreSq < curScoreSq * Stats.TargetSwitchHysteresis * Stats.TargetSwitchHysteresis)
         {
             SetTarget(best);
         }

@@ -33,16 +33,32 @@ public class PlaneFlightModel : MonoBehaviour
     public bool IsStalling => _stalling;
 
     /// <summary>
-    /// True while above <see cref="PlaneFlightStats.ServiceCeiling"/>: the air
-    /// is too thin to climb, so pilot/AI pitch input is overridden and the nose
-    /// is forced down until the plane sinks back below the ceiling. Cleared
-    /// with hysteresis (<see cref="PlaneFlightStats.CeilingRecoverMargin"/>).
+    /// The hard altitude ceiling actually in force: the TOP of the scene's
+    /// <see cref="MapBoundary"/> box when one is present, otherwise
+    /// <see cref="PlaneFlightStats.ServiceCeiling"/>. Single source of truth —
+    /// the flight model's forced nose-down and the AI's soft cap both read it.
+    /// </summary>
+    public float EffectiveServiceCeiling
+    {
+        get
+        {
+            var b = MapBoundary.Instance;
+            if (b != null) return b.TopY;
+            return Stats != null ? Stats.ServiceCeiling : float.MaxValue;
+        }
+    }
+
+    /// <summary>
+    /// True while above <see cref="EffectiveServiceCeiling"/>: the air is too
+    /// thin to climb, so pilot/AI pitch input is overridden and the nose is
+    /// forced down until the plane sinks back below the ceiling. Cleared with
+    /// hysteresis (<see cref="PlaneFlightStats.CeilingRecoverMargin"/>).
     /// </summary>
     public bool OverCeiling => _overCeiling;
 
     /// <summary>
-    /// 0 below the warning band, ramps to 1 at the service ceiling, and stays
-    /// 1 while above it. Drives the player altitude-warning HUD.
+    /// 0 below the warning band, ramps to 1 at <see cref="EffectiveServiceCeiling"/>,
+    /// and stays 1 while above it. Drives the player altitude-warning HUD.
     /// </summary>
     public float CeilingProximity { get; private set; }
 
@@ -125,27 +141,32 @@ public class PlaneFlightModel : MonoBehaviour
             _stalling = false;
         }
 
-        // Service ceiling with the same hysteresis pattern as the stall: above
-        // it the air is too thin to climb, so the nose is forced down until
-        // the plane sinks back CeilingRecoverMargin below the ceiling.
+        // Hard altitude ceiling, with the same hysteresis pattern as the
+        // stall: above it the air is too thin to climb, so the nose is forced
+        // down until the plane sinks back CeilingRecoverMargin below it. The
+        // ceiling is the TOP of the scene's MapBoundary box when one is
+        // present, otherwise the flight-stats ServiceCeiling. (The box's XZ
+        // edges are a separate, horizontal turn-back limit handled below; its
+        // top is an ALTITUDE limit — forced nose-down, ceiling HUD — not a
+        // "leaving combat area" one.)
+        var boundary = MapBoundary.Instance;
+        var serviceCeiling = boundary != null ? boundary.TopY : Stats.ServiceCeiling;
         var altitude = _transform.position.y;
         var warnBand = Mathf.Max(Stats.CeilingWarnBand, 0.0001f);
         CeilingProximity = Mathf.Clamp01(
-            (altitude - (Stats.ServiceCeiling - warnBand)) / warnBand);
+            (altitude - (serviceCeiling - warnBand)) / warnBand);
         if (!_overCeiling)
         {
-            if (altitude > Stats.ServiceCeiling) _overCeiling = true;
+            if (altitude > serviceCeiling) _overCeiling = true;
         }
-        else if (altitude < Stats.ServiceCeiling - Stats.CeilingRecoverMargin)
+        else if (altitude < serviceCeiling - Stats.CeilingRecoverMargin)
         {
             _overCeiling = false;
         }
 
-        // Map boundary: the horizontal mirror of the ceiling, but the limit is
-        // the scene's MapBoundary box rather than an altitude. Same warn-band
-        // ramp + hysteresis, measured as the signed distance to the box edge.
-        // No MapBoundary in the scene -> the whole feature is inert.
-        var boundary = MapBoundary.Instance;
+        // Map boundary (XZ edges only): the horizontal turn-back limit. Same
+        // warn-band ramp + hysteresis as the ceiling, measured as the signed
+        // distance to the box edge. No MapBoundary in the scene -> inert.
         if (boundary == null)
         {
             BoundaryProximity = 0f;
@@ -193,23 +214,41 @@ public class PlaneFlightModel : MonoBehaviour
 
         // Outside the map: override pilot/AI roll & yaw and bank back toward
         // the field centre (pitch is left to the stall/ceiling/terrain logic).
-        // Same input->rate mapping as a real stick deflection, with the
-        // command synthesised from the bearing error so it whips around while
-        // the nose points outward and rolls out level as it comes back in.
+        // The bearing to home is taken in the HORIZONTAL plane only, so a hard
+        // bank doesn't spin the "which way is home" signal around the rolling
+        // body (the old body-frame version just barrel-rolled the plane in
+        // place instead of coming about). We roll TO and HOLD a bank angle
+        // proportional to how far the nose is off home and let the model's own
+        // bank-to-turn coupling carry it round — a coordinated turn exactly
+        // like everywhere else — rolling out level as the nose swings back in.
         if (_overBoundary && boundary != null)
         {
             var toCenter = boundary.Center - _transform.position;
             toCenter.y = 0f;
-            if (toCenter.sqrMagnitude > 0.0001f)
+            var heading = _transform.forward;
+            heading.y = 0f;
+            if (toCenter.sqrMagnitude > 0.0001f && heading.sqrMagnitude > 0.0001f)
             {
-                var dirLocal = _transform.InverseTransformDirection(toCenter.normalized);
-                // dirLocal.x > 0: centre is off our right; dirLocal.z > 0: it
-                // is ahead (the AI's own steering sign convention).
-                var turnDir = dirLocal.x >= 0f ? 1f : -1f;
-                var need = 1f - Mathf.Clamp01(dirLocal.z);
-                var turn = Mathf.Clamp(turnDir * need * boundary.TurnGain, -1f, 1f);
-                targetRollRate = -turn * Stats.RollIncreaseSpeed * agility;
-                targetYawRate = (turn * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
+                // Signed horizontal bearing to home: +ve == home is to the
+                // right. A right turn needs right.y < 0 (the model's existing
+                // bank-turn sign), so the target bank is -sign(bearing).
+                var bearing = Vector3.SignedAngle(
+                    heading.normalized, toCenter.normalized, Vector3.up);
+                // 0 with the nose on home, ramping to full by 90 deg off.
+                var need = Mathf.Clamp01(Mathf.Abs(bearing) / 90f);
+                const float maxBankRightY = 0.85f; // ~58 deg of bank held
+                var targetBank = -Mathf.Sign(bearing) * maxBankRightY * need;
+                // Proportional roll toward that held bank (mirrors the -bank
+                // auto-level term, just toward a non-zero target), normalised
+                // and clamped like a stick deflection then scaled to a rate.
+                var rollCmd = Mathf.Clamp(
+                    (targetBank - bank) * boundary.TurnGain, -1f, 1f);
+                targetRollRate = rollCmd * Stats.RollIncreaseSpeed * agility;
+                // Rudder coordinated with the turn; the held bank does the
+                // rest through the standard -bank * BankTurnSpeed term.
+                var rudder = Mathf.Sign(bearing) * need;
+                targetYawRate =
+                    (rudder * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
             }
         }
 

@@ -9,6 +9,9 @@ public class PlaneCameraFollow : MonoBehaviour
     public Camera Camera;
     public Transform CameraTarget;
 
+    public Key FirstPersonToggleKey = Key.C;
+
+    bool _firstPerson;
     float _yawOffset;
     float _pitchOffset;
 
@@ -26,6 +29,7 @@ public class PlaneCameraFollow : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
+        _firstPerson = Stats.StartInFirstPerson;
         // Start parked behind the plane's initial heading; from here on the
         // orbit is world-fixed and only the player moves it.
         _yawOffset = HeadingFromForward(_transform.forward, 0f);
@@ -34,6 +38,20 @@ public class PlaneCameraFollow : MonoBehaviour
     void LateUpdate()
     {
         if (Camera == null || Stats == null) return;
+
+        var kb = Keyboard.current;
+        if (kb != null && kb[FirstPersonToggleKey].wasPressedThisFrame)
+            _firstPerson = !_firstPerson;
+
+        if (_firstPerson)
+        {
+            // Rigidly attached to the cockpit; the view turns with the plane,
+            // unlike the world-fixed third-person orbit below.
+            var fpCam = Camera.transform;
+            fpCam.position = _transform.TransformPoint(Stats.FirstPersonOffset);
+            fpCam.rotation = _transform.rotation;
+            return;
+        }
 
         ReadMouseLook();
 
