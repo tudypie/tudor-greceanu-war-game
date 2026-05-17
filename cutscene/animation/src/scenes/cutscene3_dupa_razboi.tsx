@@ -1,11 +1,14 @@
 import {Layout, Txt, makeScene2D} from '@motion-canvas/2d';
 import {createSignal, waitFor} from '@motion-canvas/core';
 import {CHAR_DELAY, COLOR, FONT, FONT_SIZE, IMG} from './shared/constants';
+import {setupBlackFade} from './shared/blackFade';
 import {AgedPhoto, SepiaPhoto} from './shared/photo';
 import {retypeText, typeText} from './shared/typewriter';
 
 export default makeScene2D(function* (view) {
   view.fill(COLOR.bg);
+
+  const fade = setupBlackFade(view);
 
   const sDate = createSignal<string>('');
 
@@ -35,9 +38,11 @@ export default makeScene2D(function* (view) {
   const sEnd1 = createSignal<string>('');
   const sEnd2 = createSignal<string>('');
   const sEnd3 = createSignal<string>('');
+  const sEnd4 = createSignal<string>('');
   const end1Op = createSignal(1);
   const end2Op = createSignal(1);
   const end3Op = createSignal(1);
+  const end4Op = createSignal(1);
   const img7Op = createSignal(0);
   const act5Op = createSignal(0);
 
@@ -88,7 +93,7 @@ export default makeScene2D(function* (view) {
         />
       </Layout>
       <Layout opacity={img4Op}>
-        <AgedPhoto src={IMG.decorat} width={620} height={420} />
+        <AgedPhoto src={IMG.decorat} width={900} height={620} />
       </Layout>
     </Layout>,
   );
@@ -109,7 +114,7 @@ export default makeScene2D(function* (view) {
         fill={COLOR.text}
       />
       <Layout opacity={img5Op}>
-        <AgedPhoto src={IMG.inchisoare} width={1150} height={540} />
+        <AgedPhoto src={IMG.inchisoare} width={1500} height={780} />
       </Layout>
       <Layout layout direction={'column'} alignItems={'center'} gap={10}>
         <Txt
@@ -206,7 +211,7 @@ export default makeScene2D(function* (view) {
       opacity={act5Op}
     >
       <Layout opacity={img7Op}>
-        <AgedPhoto src={IMG.cer} width={860} height={520} />
+        <AgedPhoto src={IMG.cer} width={1200} height={760} />
       </Layout>
       <Txt
         text={sEnd1}
@@ -229,6 +234,14 @@ export default makeScene2D(function* (view) {
         fill={COLOR.text}
         opacity={end3Op}
       />
+      <Txt
+        text={sEnd4}
+        fontFamily={FONT}
+        fontSize={FONT_SIZE.body}
+        fontWeight={700}
+        fill={COLOR.gold}
+        opacity={end4Op}
+      />
     </Layout>,
   );
 
@@ -244,6 +257,7 @@ export default makeScene2D(function* (view) {
   );
 
   // ----- ACT 1: Celebrarea -----
+  yield* fade.fadeIn();
   yield* waitFor(0.4);
   act1Op(1);
 
@@ -338,7 +352,7 @@ export default makeScene2D(function* (view) {
   yield* retypeText(sDate, 'Data: 1964 — Amnistie generala', CHAR_DELAY.fast);
   yield* typeText(sRelease1, 'Esti eliberat.', CHAR_DELAY.slow);
   yield* waitFor(0.4);
-  yield* typeText(sRelease2, 'Ai 50 de ani.', CHAR_DELAY.slow);
+  yield* typeText(sRelease2, 'Ai 47 de ani.', CHAR_DELAY.slow);
 
   yield* waitFor(2.5);
 
@@ -350,23 +364,29 @@ export default makeScene2D(function* (view) {
 
   yield* typeText(sEnd1, 'Razboiul nu ti-a dat nimic.', CHAR_DELAY.glacial);
   yield* waitFor(0.6);
-  yield* typeText(sEnd2, 'Victoria nu ti-a dat nimic.', CHAR_DELAY.glacial);
+  yield* typeText(sEnd2, 'Victoria nu ti-a adus nimic.', CHAR_DELAY.glacial);
   yield* waitFor(0.6);
   yield* typeText(sEnd3, 'Propria ta tara ti-a luat tot.', CHAR_DELAY.glacial);
 
-  yield* waitFor(3.0);
+  yield* waitFor(1.6);
+  yield* typeText(sEnd4, 'Pentru cine ai luptat?', CHAR_DELAY.glacial);
 
-  // Fade rows bottom-up
+  yield* waitFor(4.5);
+
+  // Fade everything except the rhetorical question
   yield* end3Op(0, 0.7);
   yield* end2Op(0, 0.7);
   yield* end1Op(0, 0.7);
   yield* img7Op(0, 0.9);
   yield* dateOp(0, 1.0);
 
-  yield* waitFor(1.5);
+  yield* waitFor(5.0);
 
-  // Credit
+  // Credit appears under the lingering question
   sCredit('Bazat pe viata pilotului Tudor Greceanu');
   creditOp(1);
-  yield* waitFor(4.0);
+  yield* waitFor(6.0);
+
+  // Final fade to black
+  yield* fade.fadeOut(1.8);
 });

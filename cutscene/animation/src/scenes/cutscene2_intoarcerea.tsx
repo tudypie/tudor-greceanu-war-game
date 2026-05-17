@@ -2,11 +2,14 @@ import {Layout, Txt, makeScene2D} from '@motion-canvas/2d';
 import {all, createRef, createSignal, waitFor} from '@motion-canvas/core';
 import {CHAR_DELAY, COLOR, FONT, FONT_SIZE, IMG} from './shared/constants';
 import {glitch} from './shared/fx';
+import {setupBlackFade} from './shared/blackFade';
 import {AgedPhoto} from './shared/photo';
 import {retypeText, typeText} from './shared/typewriter';
 
 export default makeScene2D(function* (view) {
   view.fill(COLOR.bg);
+
+  const fade = setupBlackFade(view);
 
   const sDate = createSignal<string>('Data: Mai 1943');
   const sLoc = createSignal<string>('');
@@ -26,10 +29,9 @@ export default makeScene2D(function* (view) {
   const act3Opacity = createSignal(0);
 
   const root = createRef<Layout>();
-  const fadeOut = createSignal(1);
 
   view.add(
-    <Layout ref={root} opacity={fadeOut}>
+    <Layout ref={root}>
       <Layout
         layout
         direction={'column'}
@@ -121,6 +123,7 @@ export default makeScene2D(function* (view) {
     </Layout>,
   );
 
+  yield* fade.fadeIn();
   yield* waitFor(0.8);
 
   yield* glitch(root, 3);
@@ -154,8 +157,8 @@ export default makeScene2D(function* (view) {
   yield* all(act2Opacity(0, 1.2), imgBOpacity(0, 1.2));
 
   act3Opacity(1);
-  yield* typeText(sFinal, 'Inamicul tau de ieri. Aliatul tau de azi. Pentru cine lupti?', CHAR_DELAY.slow);
+  yield* typeText(sFinal, 'Inamicul tau de ieri. Aliatul tau de azi. Nu ai de ales.', CHAR_DELAY.slow);
 
   yield* waitFor(2.0);
-  yield* fadeOut(0, 1.5);
+  yield* fade.fadeOut();
 });

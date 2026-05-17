@@ -1,6 +1,7 @@
 import {Img, Layout, Rect, Txt, makeScene2D} from '@motion-canvas/2d';
 import {Reference, SimpleSignal, createRef, createSignal, waitFor} from '@motion-canvas/core';
 import {CHAR_DELAY, COLOR, FONT, FONT_SIZE, IMG} from './shared/constants';
+import {setupBlackFade} from './shared/blackFade';
 import {AgedPhoto} from './shared/photo';
 import {blink, typeText} from './shared/typewriter';
 
@@ -16,6 +17,8 @@ interface Line {
 
 export default makeScene2D(function* (view) {
   view.fill(COLOR.bg);
+
+  const fade = setupBlackFade(view);
 
   const mk = (
     text: string,
@@ -92,6 +95,7 @@ export default makeScene2D(function* (view) {
     />,
   );
 
+  yield* fade.fadeIn();
   yield* waitFor(0.4);
 
   lines[0].cursor().opacity(1);
@@ -125,5 +129,6 @@ export default makeScene2D(function* (view) {
 
   yield* waitFor(1.0);
   yield* imgOpacity(0, 1.2);
-  yield* waitFor(1.5);
+  yield* waitFor(0.5);
+  yield* fade.fadeOut();
 });

@@ -15,21 +15,25 @@ export interface AgedPhotoProps extends Omit<ImgProps, 'filters'> {
   imgRef?: Reference<Img>;
 }
 
-export function AgedPhoto({imgRef, ...imgProps}: AgedPhotoProps) {
+export function AgedPhoto({imgRef, width, height, ...imgProps}: AgedPhotoProps) {
   return (
     <Img
       ref={imgRef}
       {...imgProps}
+      maxWidth={width}
+      maxHeight={height}
       filters={[grayscale(0.75), contrast(1.18), sepia(0.18)]}
     />
   );
 }
 
-export function SepiaPhoto({imgRef, ...imgProps}: AgedPhotoProps) {
+export function SepiaPhoto({imgRef, width, height, ...imgProps}: AgedPhotoProps) {
   return (
     <Img
       ref={imgRef}
       {...imgProps}
+      maxWidth={width}
+      maxHeight={height}
       filters={[
         grayscale(1),
         sepia(0.95),

@@ -1,5 +1,6 @@
 import {Layout, Rect, Txt, makeScene2D} from '@motion-canvas/2d';
 import {createRef, createSignal, waitFor} from '@motion-canvas/core';
+import {setupBlackFade} from './shared/blackFade';
 
 const LINES = [
   'Data: mai 1943',
@@ -16,6 +17,8 @@ const BLINK_PERIOD = 0.5;
 
 export default makeScene2D(function* (view) {
   view.fill(BG);
+
+  const fade = setupBlackFade(view);
 
   const sigs = LINES.map(() => createSignal(''));
   const cursors = LINES.map(() => createRef<Rect>());
@@ -49,6 +52,8 @@ export default makeScene2D(function* (view) {
     </Layout>,
   );
 
+  yield* fade.fadeIn();
+
   for (let i = 0; i < LINES.length; i++) {
     cursors[i]().opacity(1);
     yield* blink(cursors[i](), 1);
@@ -66,6 +71,8 @@ export default makeScene2D(function* (view) {
   }
 
   yield* blink(cursors[LINES.length - 1](), 8);
+
+  yield* fade.fadeOut();
 });
 
 function* blink(cursor: Rect, cycles: number) {

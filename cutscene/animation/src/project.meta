@@ -3,7 +3,7 @@
   "shared": {
     "background": "rgba(34,17,119,0.07)",
     "range": [
-      0,
+      79.08333233333333,
       null
     ],
     "size": {
@@ -13,19 +13,18 @@
     "audioOffset": 0
   },
   "preview": {
-    "fps": 30,
+    "fps": 24,
     "resolutionScale": 1
   },
   "rendering": {
-    "fps": 60,
+    "fps": 24,
     "resolutionScale": 1,
     "colorSpace": "srgb",
     "exporter": {
-      "name": "@motion-canvas/core/image-sequence",
+      "name": "@motion-canvas/ffmpeg",
       "options": {
-        "fileType": "image/png",
-        "quality": 100,
-        "groupByScene": false
+        "fastStart": true,
+        "includeAudio": true
       }
     }
   }
