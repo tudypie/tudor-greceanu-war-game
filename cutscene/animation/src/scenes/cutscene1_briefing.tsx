@@ -40,7 +40,7 @@ export default makeScene2D(function* (view) {
     mk('Frontul de Est, 1943.', FONT_SIZE.small, COLOR.dim, 30),
     mk('Romania lupta alaturi de Germania nazista.', FONT_SIZE.small, COLOR.dim),
     mk('Pilotii romani aparau cerul impreuna.', FONT_SIZE.small, COLOR.dim),
-    mk('Esti pilot. Asta este tot ce stii sa fii.', FONT_SIZE.body, COLOR.text, 50, CHAR_DELAY.slow),
+    mk('Esti pilot. Nimic altceva nu conteaza acum.', FONT_SIZE.body, COLOR.text, 50, CHAR_DELAY.slow),
   ];
 
   const imgRef = createRef<Img>();

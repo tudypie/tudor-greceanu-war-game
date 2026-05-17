@@ -57,7 +57,7 @@ export default makeScene2D(function* (view) {
         direction={'column'}
         alignItems={'center'}
         gap={28}
-        y={-40}
+        y={80}
         opacity={act1Opacity}
       >
         <Txt
@@ -123,11 +123,13 @@ export default makeScene2D(function* (view) {
 
   yield* waitFor(0.8);
 
-  yield* retypeText(sDate, 'Data: 23 August 1944', CHAR_DELAY.fast);
   yield* glitch(root, 3);
 
   yield* imgAOpacity(1, 0.3);
-  yield* typeText(sTitle, 'ROMANIA A INTORS ARMELE', CHAR_DELAY.slow);
+  yield* all(
+    retypeText(sDate, 'Data: 23 August 1944', CHAR_DELAY.fast),
+    typeText(sTitle, 'ROMANIA A INTORS ARMELE', CHAR_DELAY.slow),
+  );
 
   yield* typeText(sCtx1, 'Regele Mihai I a ordonat arestarea lui Ion Antonescu.', CHAR_DELAY.normal);
   yield* waitFor(0.3);
@@ -152,7 +154,7 @@ export default makeScene2D(function* (view) {
   yield* all(act2Opacity(0, 1.2), imgBOpacity(0, 1.2));
 
   act3Opacity(1);
-  yield* typeText(sFinal, 'Inamicul tau de ieri. Aliatul tau de ieri. Acelasi cer.', CHAR_DELAY.slow);
+  yield* typeText(sFinal, 'Inamicul tau de ieri. Aliatul tau de azi. Pentru cine lupti?', CHAR_DELAY.slow);
 
   yield* waitFor(2.0);
   yield* fadeOut(0, 1.5);

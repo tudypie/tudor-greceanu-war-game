@@ -1,7 +1,7 @@
-import {Layout, Rect, Txt, makeScene2D} from '@motion-canvas/2d';
+import {Layout, Txt, makeScene2D} from '@motion-canvas/2d';
 import {createSignal, waitFor} from '@motion-canvas/core';
 import {CHAR_DELAY, COLOR, FONT, FONT_SIZE, IMG} from './shared/constants';
-import {AgedPhoto} from './shared/photo';
+import {AgedPhoto, SepiaPhoto} from './shared/photo';
 import {retypeText, typeText} from './shared/typewriter';
 
 export default makeScene2D(function* (view) {
@@ -13,8 +13,6 @@ export default makeScene2D(function* (view) {
   const sPlain = createSignal<string>('');
   const img4Op = createSignal(0);
   const act1Op = createSignal(0);
-
-  const flashOp = createSignal(0);
 
   const sArrestTitle = createSignal<string>('');
   const sArrestCtx1 = createSignal<string>('');
@@ -139,7 +137,7 @@ export default makeScene2D(function* (view) {
       opacity={act3Op}
     >
       <Layout opacity={img6Op}>
-        <AgedPhoto src={IMG.fabrica} width={720} height={480} />
+        <SepiaPhoto src={IMG.fabrica} width={720} height={480} />
       </Layout>
       <Layout layout direction={'column'} gap={16}>
         <Txt
@@ -235,15 +233,6 @@ export default makeScene2D(function* (view) {
   );
 
   view.add(
-    <Rect
-      width={view.width}
-      height={view.height}
-      fill={COLOR.white}
-      opacity={flashOp}
-    />,
-  );
-
-  view.add(
     <Txt
       text={sCredit}
       fontFamily={FONT}
@@ -266,7 +255,7 @@ export default makeScene2D(function* (view) {
   yield* img4Op(1, 1.2);
   yield* typeText(sGold, 'Esti pilot decorat. Misiuni indeplinite.', CHAR_DELAY.slow);
   yield* waitFor(1.2);
-  yield* typeText(sPlain, 'Sau asa credeai.', CHAR_DELAY.slow);
+  yield* typeText(sPlain, 'Si ce daca?', CHAR_DELAY.slow);
   yield* waitFor(1.5);
 
   // ----- ACT 2: Arestarea -----
@@ -274,15 +263,12 @@ export default makeScene2D(function* (view) {
   act1Op(0);
 
   yield* retypeText(sDate, 'Data: Aprilie 1949', CHAR_DELAY.fast);
+  yield* waitFor(1.2);
 
-  yield* flashOp(0.9, 0.06);
-  yield* flashOp(0, 0.18);
-
-  act2Op(1);
-  img5Op(1);
-  sArrestTitle('ARESTAT');
-
-  yield* waitFor(0.8);
+  yield* act2Op(1, 0.6);
+  yield* typeText(sArrestTitle, 'ARESTAT', CHAR_DELAY.glacial);
+  yield* waitFor(0.6);
+  yield* img5Op(1, 1.4);
 
   const arrestDelay = CHAR_DELAY.slow * 2;
   yield* typeText(
@@ -293,7 +279,7 @@ export default makeScene2D(function* (view) {
   yield* waitFor(0.3);
   yield* typeText(
     sArrestCtx2,
-    'Pilotul care aparase Romania era acum dusman al poporului. Tu.',
+    'Pilotul care aparase Romania. Tu. Acum dusman al poporului',
     arrestDelay,
   );
 
@@ -313,11 +299,11 @@ export default makeScene2D(function* (view) {
   yield* waitFor(0.3);
   yield* typeText(
     sFactory2,
-    'Pilot decorat, aplecat peste o masina-unealta.',
+    'Pilot decorat, aplecat peste o unealta.',
     CHAR_DELAY.normal,
   );
   yield* waitFor(0.3);
-  yield* typeText(sFactory3, 'Cerul iti era doar o amintire.', CHAR_DELAY.slow);
+  yield* typeText(sFactory3, 'Cerul iti este doar o amintire.', CHAR_DELAY.slow);
 
   yield* waitFor(1.8);
 
@@ -337,9 +323,6 @@ export default makeScene2D(function* (view) {
   }
 
   yield* waitFor(0.6);
-  yield* typeText(sEscape, 'Evadezi.', CHAR_DELAY.slow);
-  yield* waitFor(2.0);
-  sEscape('');
 
   const phaseB = [
     '1953', '1954', '1955', '1956', '1957', '1958',
