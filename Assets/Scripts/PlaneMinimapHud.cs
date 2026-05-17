@@ -87,10 +87,12 @@ public class PlaneMinimapHud : MonoBehaviour
             float cardRadius = halfPx - Stats.CardinalInset;
             prev = GUI.color;
             GUI.color = Color.white;
-            DrawCardinal("N", 0f, 1f, cosY, sinY, cx, cy, cardRadius);
-            DrawCardinal("E", 1f, 0f, cosY, sinY, cx, cy, cardRadius);
-            DrawCardinal("S", 0f, -1f, cosY, sinY, cx, cy, cardRadius);
-            DrawCardinal("W", -1f, 0f, cosY, sinY, cx, cy, cardRadius);
+            // Cardinals rotated 90° CW: world +Z (old North) is now East so the
+            // directional sun reads as sunrise in the east on the compass.
+            DrawCardinal("E", 0f, 1f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("S", 1f, 0f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("W", 0f, -1f, cosY, sinY, cx, cy, cardRadius);
+            DrawCardinal("N", -1f, 0f, cosY, sinY, cx, cy, cardRadius);
             GUI.color = prev;
         }
 

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Default.weapon
   m_EditorClassIdentifier: 
   Range: 1000
-  FireInterval: 0.001
+  FireInterval: 0.08
   MuzzleOffsetZ: 1.333
   Damage: 8
   HitMask:

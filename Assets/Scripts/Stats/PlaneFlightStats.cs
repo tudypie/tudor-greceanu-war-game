@@ -96,4 +96,68 @@ public class PlaneFlightStats : ScriptableObject
 
     // The horizontal limit (the map boundary, the ceiling's twin) is NOT here:
     // it is a scene-placed box you size in the editor — see MapBoundary.
+
+    [Header("Takeoff / Ground")]
+    // Only used by a plane flagged StartGrounded on its PlaneFlightModel
+    // (player only). Taxi is a SEPARATE model from flight — none of these
+    // touch the airborne thrust/throttle values above. All speeds are scaled
+    // m/s (world runs at 1/3 scale). The plane only becomes "flying" when the
+    // pilot actively rotates and lifts it MinFlyAltitude off the strip
+    // (holding the nose-up input); there is no automatic liftoff.
+
+    // Wheel height below the body pivot; keeps the box collider just clear of
+    // the TerrainCollider so the parked plane rests on the strip.
+    public float GroundGearHeight = 0.6f;
+
+    // Throttle lever spool on the ground, kept separate from the airborne
+    // boost spool so taxi power is its own slow, deliberate control.
+    public float TaxiThrottleAccelRate = 0.4f;
+    public float TaxiThrottleDecelRate = 0.6f;
+    // Taxi / takeoff-roll acceleration. Deliberately slow — a heavy fighter
+    // gathering speed, NOT the snappy airborne response (0 -> MaxGroundSpeed
+    // takes ~7 s at the defaults).
+    public float GroundAccel = 3f;
+    // Roll-out / braking when the throttle is backed off (a touch quicker
+    // than it accelerates so chopping power settles the taxi).
+    public float GroundBrakeDecel = 5f;
+    // Top speed on the wheels.
+    public float MaxGroundSpeed = 22f;
+
+    // Vr — rotation speed. Below it the elevator has no authority and the
+    // plane just rolls; at/above it, holding the nose-up input pitches the
+    // nose up and the plane starts to climb off the strip. ~Just above
+    // StallSpeed (13.3) so a rotation makes real lift, not a stall.
+    public float RotationSpeed = 16f;
+    // How fast the nose rises/falls while rotating (deg/s) as long as the
+    // nose-up input is held — the rotation is NOT capped at a fixed angle
+    // (only a near-vertical safety guard in the model). Deliberately
+    // unhurried so rotation feels like flying a heavy plane off, not
+    // flicking it.
+    public float GroundPitchRate = 18f;
+    // The "is it flying yet" gate: the plane is handed to the flight model
+    // only once the pilot has actually lifted it this far (world units) above
+    // the strip. No speed alone ever triggers it — it must be flown off.
+    public float MinFlyAltitude = 8f;
+    // Max rate (m/s) the Y pin corrects at while taxiing, so dropping back
+    // onto the strip is a firm settle rather than an instant snap.
+    public float GroundSettleSpeed = 10f;
+    // The takeoff transition window. Over this many seconds after the wheels
+    // leave the strip BOTH the airspeed blends up to cruise AND pilot control
+    // authority / engine agility ramp in from TakeoffControlStartAuthority to
+    // full — one knob for "how long the takeoff takes" (Vr ~16 -> cruise 56).
+    public float TakeoffSpeedBlendTime = 3.5f;
+    // How much pilot control authority + engine agility is available the
+    // instant the wheels leave the strip (0..1), smoothstepping to full over
+    // TakeoffSpeedBlendTime. Low so the controls are soft at liftoff and firm
+    // up as airspeed builds — like a real takeoff — instead of the air model
+    // snapping to full 300 deg/s pitch authority and rearing the nose up.
+    public float TakeoffControlStartAuthority = 0.15f;
+
+    // Nosewheel/rudder steering authority while taxiing (deg/s at full
+    // deflection). Like a car: it has to be rolling to steer.
+    public float GroundSteerRateDeg = 45f;
+    // Steering ramps from none at a standstill up to full by this ground
+    // speed and STAYS full above it: you can't pivot parked, but once it's
+    // rolling it always steers — it does NOT wash out at takeoff-roll speed.
+    public float GroundSteerSpeedRampUp = 4f;
 }

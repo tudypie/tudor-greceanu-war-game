@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Events;
 
 public class PlaneFlightModel : MonoBehaviour
 {
@@ -6,6 +7,14 @@ public class PlaneFlightModel : MonoBehaviour
     Rigidbody _rigidbody;
 
     public PlaneFlightStats Stats;
+
+    [Tooltip("Player plane only: start parked on the runway and require a " +
+        "takeoff roll. Leave false for AI and any air-start plane.")]
+    [SerializeField] bool StartGrounded = false;
+
+    [Tooltip("Fired once, the moment the wheels leave the strip and the " +
+        "plane is handed to the flight model. Never fires for air-start planes.")]
+    public UnityEvent OnTakeoff;
 
     [HideInInspector] public float PitchInput;
     [HideInInspector] public float RollInput;
@@ -19,6 +28,19 @@ public class PlaneFlightModel : MonoBehaviour
     bool _stalling;
     bool _overCeiling;
     bool _overBoundary;
+
+    // Grounded takeoff/taxi model (player only — see StartGrounded). The
+    // airborne code path below is entered exactly once, via a short speed
+    // blend, and never exited back to the ground (there is no landing model).
+    bool _grounded;
+    float _groundSpeed;
+    float _groundPitchDeg;
+    bool _blendingToAir;
+    bool _takingOff;
+    float _takeoffTimer;
+    float _blendStartSpeed;
+    Terrain _terrain;
+    float _terrainBaseY;
 
     public Transform CachedTransform => _transform;
     public Rigidbody Body => _rigidbody;
@@ -83,11 +105,21 @@ public class PlaneFlightModel : MonoBehaviour
     public float CurrentSpeed { get; private set; }
 
     /// <summary>
-    /// Throttle position: 0 at <see cref="PlaneFlightStats.NormalThrust"/>,
-    /// 1 at <see cref="PlaneFlightStats.MaxThrust"/>. Ramps linearly toward
-    /// the boost input rather than snapping. Useful for a throttle HUD.
+    /// Throttle position: airborne, 0 at <see cref="PlaneFlightStats.NormalThrust"/>
+    /// and 1 at <see cref="PlaneFlightStats.MaxThrust"/>; while
+    /// <see cref="IsGrounded"/> it is the absolute 0..1 ground lever (0 ==
+    /// stationary). Ramps linearly toward the boost input rather than
+    /// snapping. Useful for a throttle HUD.
     /// </summary>
     public float Throttle01 => _throttle01;
+
+    /// <summary>
+    /// True while the plane is still on the ground in the takeoff/taxi model
+    /// (player only — see StartGrounded). Goes false for good at liftoff and
+    /// never returns: there is no landing model. Lets the crash/HUD/audio
+    /// treat a parked plane sensibly.
+    /// </summary>
+    public bool IsGrounded => _grounded;
 
     void Start()
     {
@@ -101,12 +133,83 @@ public class PlaneFlightModel : MonoBehaviour
         {
             Debug.LogError($"{nameof(PlaneFlightModel)} on {name} has no Stats assigned.", this);
         }
+
+        // Terrain handle, cached the layer-independent way the AI and crash
+        // backstop do it (heightfield sampling, no colliders involved).
+        _terrain = Terrain.activeTerrain;
+        if (_terrain == null) _terrain = FindFirstObjectByType<Terrain>();
+        _terrainBaseY = _terrain != null ? _terrain.transform.position.y : 0f;
+
+        // Player-only: start parked on the strip. Snap level (keeping the
+        // authored heading), pin to the terrain at gear height, speed and
+        // throttle at zero, and freeze the body so it can't drift before the
+        // first physics step. AI never sets StartGrounded, so they run the
+        // airborne model from frame one, byte-for-byte unchanged.
+        if (StartGrounded && Stats != null)
+        {
+            _grounded = true;
+            _groundSpeed = 0f;
+            _throttle01 = 0f;
+            CurrentSpeed = 0f;
+
+            var flatForward = _transform.forward;
+            flatForward.y = 0f;
+            if (flatForward.sqrMagnitude > 0.0001f)
+            {
+                flatForward.Normalize();
+                _transform.rotation =
+                    Quaternion.LookRotation(flatForward, Vector3.up);
+            }
+
+            if (_terrain != null)
+            {
+                var pos = _transform.position;
+                pos.y = _terrainBaseY + _terrain.SampleHeight(pos)
+                    + Stats.GroundGearHeight;
+                _transform.position = pos;
+            }
+
+            if (_rigidbody != null)
+            {
+                _rigidbody.linearVelocity = Vector3.zero;
+                _rigidbody.angularVelocity = Vector3.zero;
+            }
+        }
     }
 
     void FixedUpdate()
     {
         if (Stats == null) return;
         var dt = Time.fixedDeltaTime;
+
+        // On the wheels: a separate, self-contained takeoff/taxi model. It
+        // hands off to the airborne code below exactly once (at liftoff) and
+        // is never re-entered, so everything past here is the original model.
+        if (_grounded) { GroundedFixedUpdate(dt); return; }
+
+        // Takeoff transition window (player only; armed by the grounded
+        // handoff, never by AI — so for AI takeoffAuth stays 1 and everything
+        // below is the original model). Over TakeoffSpeedBlendTime the
+        // airspeed blends up to cruise (bottom of this method) AND pilot
+        // control authority + engine agility ease in from
+        // TakeoffControlStartAuthority to full, so the plane flies off the
+        // strip smoothly instead of the air model snapping to full authority
+        // and rearing the nose up.
+        var takeoffAuth = 1f;
+        if (_takingOff || _blendingToAir)
+        {
+            _takeoffTimer += dt;
+            var tk = Stats.TakeoffSpeedBlendTime > 0f
+                ? Mathf.Clamp01(_takeoffTimer / Stats.TakeoffSpeedBlendTime)
+                : 1f;
+            if (_takingOff)
+            {
+                var ease = tk * tk * (3f - 2f * tk); // smoothstep
+                takeoffAuth =
+                    Mathf.Lerp(Stats.TakeoffControlStartAuthority, 1f, ease);
+                if (tk >= 1f) _takingOff = false;
+            }
+        }
 
         // Hold the boost input to spool the throttle up toward MaxThrust;
         // release it and it bleeds back down to NormalThrust. The linear
@@ -118,6 +221,10 @@ public class PlaneFlightModel : MonoBehaviour
         // Boost agility scales with the throttle so handling firms up
         // smoothly as it spools instead of snapping when the key goes down.
         var agility = Mathf.Lerp(1f, Stats.ThrustAgilityMultiplier, _throttle01);
+        // Takeoff: mute the throttle-at-1.0 -> max-WEP agility spike at the
+        // instant of liftoff; it firms up with the rest of the controls.
+        // takeoffAuth == 1 in normal flight and for AI, so this is a no-op.
+        agility = Mathf.Lerp(1f, agility, takeoffAuth);
 
         var bank = _transform.right.y;
 
@@ -205,12 +312,20 @@ public class PlaneFlightModel : MonoBehaviour
                 : Stats.CeilingNoseDownRate * agility;
         }
         else
+            // Pilot pitch authority eases in over the takeoff (takeoffAuth);
+            // the stall / ceiling overrides above keep FULL authority so a
+            // post-liftoff stall still recovers normally.
             targetPitchRate = (Stats.InvertPitch ? -PitchInput : PitchInput)
-                * Stats.PitchIncreaseSpeed * agility;
-        var targetRollRate = Mathf.Approximately(RollInput, 0f)
+                * Stats.PitchIncreaseSpeed * agility * takeoffAuth;
+        // Pilot roll/yaw authority eases in the same way. The _overBoundary
+        // block below REASSIGNS these at full strength, so boundary recovery
+        // is never weakened by the takeoff ramp.
+        var targetRollRate = (Mathf.Approximately(RollInput, 0f)
             ? -bank * Stats.RollAutoLevelSpeed * agility
-            : -RollInput * Stats.RollIncreaseSpeed * agility;
-        var targetYawRate = (YawInput * Stats.YawSpeed - bank * Stats.BankTurnSpeed) * agility;
+            : -RollInput * Stats.RollIncreaseSpeed * agility) * takeoffAuth;
+        var targetYawRate =
+            (YawInput * Stats.YawSpeed - bank * Stats.BankTurnSpeed)
+            * agility * takeoffAuth;
 
         // Outside the map: override pilot/AI roll & yaw and bank back toward
         // the field centre (pitch is left to the stall/ceiling/terrain logic).
@@ -286,5 +401,138 @@ public class PlaneFlightModel : MonoBehaviour
         // Direct velocity assignment: thrust maps straight to m/s, no
         // Time.fixedDeltaTime applied to the velocity itself.
         _rigidbody.linearVelocity = velocity;
+
+        // Just left the ground: the air model jumps straight to cruise speed,
+        // so for a moment after liftoff rescale the assigned velocity from the
+        // rotation speed up to it (direction untouched). This is a pure post-
+        // process on the output above — the airborne logic itself is intact.
+        if (_blendingToAir)
+        {
+            // Shares the single _takeoffTimer (advanced once at the top of
+            // this method) with the control-authority ramp.
+            var blendT = Stats.TakeoffSpeedBlendTime > 0f
+                ? Mathf.Clamp01(_takeoffTimer / Stats.TakeoffSpeedBlendTime)
+                : 1f;
+            var assigned = _rigidbody.linearVelocity;
+            var mag = assigned.magnitude;
+            if (mag > 0.0001f)
+            {
+                var blendedSpeed = Mathf.Lerp(_blendStartSpeed, mag, blendT);
+                _rigidbody.linearVelocity = assigned * (blendedSpeed / mag);
+            }
+            if (blendT >= 1f) _blendingToAir = false;
+        }
+    }
+
+    // Free taxi + a flown takeoff on the wheels — a model entirely separate
+    // from flight. Throttle is a slow, real 0->1 lever (idle 0 == stationary).
+    // There is NO automatic liftoff: below Vr the plane only rolls; at/above
+    // Vr the held nose-up input rotates the nose and the plane climbs off the
+    // strip, and only once it is actually MinFlyAltitude up is it handed to
+    // the flight model. Let go and it settles back onto the runway.
+    void GroundedFixedUpdate(float dt)
+    {
+        var pos = _transform.position;
+
+        // Throttle on its own slow taxi spool, separate from the airborne
+        // boost spool. Hold Boost (Space) to spool up, release to spool down.
+        var throttleTarget = Boost ? 1f : 0f;
+        var throttleRate = Boost
+            ? Stats.TaxiThrottleAccelRate
+            : Stats.TaxiThrottleDecelRate;
+        _throttle01 = Mathf.MoveTowards(_throttle01, throttleTarget, throttleRate * dt);
+
+        // Ground speed chases a throttle-proportional target with the slow
+        // taxi accel / brake rates (deliberately nothing like the air model).
+        var targetSpeed = _throttle01 * Stats.MaxGroundSpeed;
+        var speedRate = _groundSpeed < targetSpeed
+            ? Stats.GroundAccel
+            : Stats.GroundBrakeDecel;
+        _groundSpeed = Mathf.MoveTowards(_groundSpeed, targetSpeed, speedRate * dt);
+        CurrentSpeed = _groundSpeed;
+
+        // Nosewheel/rudder steering from yaw input (Q/E), car-like: no
+        // authority parked, ramping up to full by GroundSteerSpeedRampUp and
+        // staying full while it has speed (it does NOT wash out at takeoff-
+        // roll speed). RollInput (Move.x) is inert here.
+        if (_groundSpeed > 0.05f && !Mathf.Approximately(YawInput, 0f))
+        {
+            var steerScale = Mathf.Clamp01(
+                _groundSpeed / Mathf.Max(Stats.GroundSteerSpeedRampUp, 0.0001f));
+            _transform.Rotate(
+                Vector3.up,
+                YawInput * Stats.GroundSteerRateDeg * steerScale * dt,
+                Space.World);
+        }
+
+        // Rotation: only at/above Vr does the nose-up input have authority.
+        // The nose-up sign matches the airframe's climb convention exactly
+        // (cf. PlaneAIController.ClimbInputSign). Held -> the nose keeps
+        // rising at GroundPitchRate (NOT capped at a fixed angle — only a
+        // near-vertical guard so the heading math below stays well defined,
+        // and the plane hands off to the flight model long before then);
+        // released -> falls back to level.
+        const float pitchGuardDeg = 85f;
+        var climbSign = Stats.InvertPitch ? 1f : -1f;
+        var climbCmd = Mathf.Clamp01(PitchInput * climbSign);
+        var pitchAuthority = _groundSpeed >= Stats.RotationSpeed;
+        var targetPitch = pitchAuthority ? climbCmd * pitchGuardDeg : 0f;
+        _groundPitchDeg = Mathf.MoveTowards(
+            _groundPitchDeg, targetPitch, Stats.GroundPitchRate * dt);
+
+        // Attitude: heading from the (post-steer) flat forward, wings always
+        // level, nose pitched up by _groundPitchDeg. Negative Euler-X is
+        // nose-up for a +Z-forward body, matching the air model's sign.
+        var flatForward = _transform.forward;
+        flatForward.y = 0f;
+        if (flatForward.sqrMagnitude < 0.0001f) flatForward = Vector3.forward;
+        flatForward.Normalize();
+        _transform.rotation = Quaternion.LookRotation(flatForward, Vector3.up)
+            * Quaternion.Euler(-_groundPitchDeg, 0f, 0f);
+        var climbForward = _transform.forward;
+
+        // Wheels-on-the-strip height. Layer-independent heightfield sample;
+        // with no terrain (test scene) treat the current Y as ground.
+        var haveTerrain = _terrain != null;
+        var restY = haveTerrain
+            ? _terrainBaseY + _terrain.SampleHeight(pos) + Stats.GroundGearHeight
+            : pos.y;
+
+        // Velocity in the model's direct-assignment style: follow the nose at
+        // ground speed. Nose down -> a pure taxi: glue Y to the strip (tracking
+        // terrain up and down, clamped so dropping back is a firm settle, not
+        // a snap). Nose up -> follow the climb but never sink through the strip.
+        var velocity = climbForward * _groundSpeed;
+        if (_groundPitchDeg <= 0.1f)
+        {
+            velocity.y = Mathf.Clamp(
+                (restY - pos.y) / dt,
+                -Stats.GroundSettleSpeed, Stats.GroundSettleSpeed);
+        }
+        else
+        {
+            var minVy = (restY - pos.y) / dt;
+            if (velocity.y < minVy) velocity.y = minVy;
+        }
+        _rigidbody.linearVelocity = velocity;
+        _rigidbody.angularVelocity = Vector3.zero;
+
+        // "Is it flying yet" gate: only once the pilot has actually lifted it
+        // MinFlyAltitude above the strip. No speed-only auto-liftoff — the
+        // plane stays in the taxi model until it is flown off. (No terrain:
+        // fall back to a held rotation above Vr.) Handoff is one-way: clear
+        // _grounded and arm the speed blend; the air model owns it from here.
+        var flyingNow = haveTerrain
+            ? pos.y - restY >= Stats.MinFlyAltitude
+            : _groundPitchDeg > 0.1f && _groundSpeed >= Stats.RotationSpeed;
+        if (flyingNow)
+        {
+            _grounded = false;
+            _blendingToAir = true;
+            _takingOff = true;
+            _takeoffTimer = 0f;
+            _blendStartSpeed = _groundSpeed;
+            OnTakeoff?.Invoke();
+        }
     }
 }

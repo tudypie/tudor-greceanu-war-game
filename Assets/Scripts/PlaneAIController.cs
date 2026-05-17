@@ -12,18 +12,22 @@ using UnityEngine;
 // threat blends the aim to a climb-out point and, at high threat, commands a
 // hard wings-level pull with guns cold. A Layer-1 aim clamp and Layer-3 hard
 // floor-recovery sit under it, mirrored for the ceiling and map boundary.
+// Shared, faction-agnostic fighter base: flight pipeline, FSM, target
+// scanning, retaliation, crowd cap, terrain/GCAS safety, firing, gizmos.
+// Concrete doctrine lives in the subclasses (EnemyAI / AllyAI) via the
+// protected virtual seams below; never put faction logic here.
 [DefaultExecutionOrder(-100)]
 [RequireComponent(typeof(PlaneFlightModel))]
 [RequireComponent(typeof(PlaneHealth))]
-public class PlaneAIController : MonoBehaviour
+public abstract class PlaneAIController : MonoBehaviour
 {
     enum AIState { Patrol, Engage, Disengage }
     enum DisengageReason { Window, LoseInterest, Overshoot }
 
     PlaneFlightModel _model;
     PlaneShooter _shooter;
-    PlaneHealth _health;
-    Transform _transform;
+    protected PlaneHealth _health;
+    protected Transform _transform;
 
     public PlaneAIStats Stats;
 
@@ -34,7 +38,7 @@ public class PlaneAIController : MonoBehaviour
     float _patrolWaypointDeadline;
     AIState _state = AIState.Patrol;
 
-    PlaneHealth _target;
+    protected PlaneHealth _target;
     float _nextTargetRefresh;
     float _targetOutOfRangeSince = -1f;
 
@@ -50,7 +54,7 @@ public class PlaneAIController : MonoBehaviour
     // (terrain safety still wins). Each fresh hit pushes the deadline out.
     PlaneHealth _retaliateTarget;
     float _retaliateUntil = -1f;
-    bool RetaliationActive =>
+    protected bool RetaliationActive =>
         _retaliateTarget != null && !_retaliateTarget.IsDead &&
         Time.fixedTime < _retaliateUntil;
 
@@ -92,7 +96,7 @@ public class PlaneAIController : MonoBehaviour
     int _lagCount;
     PlaneHealth _lagSampledTarget;
 
-    void Start()
+    protected virtual void Start()
     {
         _transform = transform;
         _model = GetComponent<PlaneFlightModel>();
@@ -111,7 +115,7 @@ public class PlaneAIController : MonoBehaviour
         RefreshTarget(force: true);
     }
 
-    void OnDestroy()
+    protected virtual void OnDestroy()
     {
         if (_health != null) _health.DamagedBy -= OnDamagedBy;
         RegisterAttacker(null);
@@ -125,10 +129,21 @@ public class PlaneAIController : MonoBehaviour
         if (Stats == null || !Stats.RetaliateWhenShot) return;
         if (attacker == null || attacker == _health || attacker.IsDead) return;
         if (_health == null || !_health.IsHostileTo(attacker)) return;
+        BeginRetaliation(attacker);
+    }
+
+    // Lock onto `attacker` via the retaliation machinery (overrides player
+    // bias, range loss and all disengages until the timer expires). The
+    // caller validates the attacker; reused by AllyAI's guard-the-player call.
+    protected void BeginRetaliation(PlaneHealth attacker)
+    {
         _retaliateTarget = attacker;
         _retaliateUntil = Time.fixedTime + Stats.RetaliationDuration;
         SetTarget(attacker);
     }
+
+    // Per-FixedUpdate subclass hook (runs before the model/Stats guard).
+    protected virtual void OnFixedUpdate() { }
 
     void CacheTerrain()
     {
@@ -139,6 +154,7 @@ public class PlaneAIController : MonoBehaviour
 
     void FixedUpdate()
     {
+        OnFixedUpdate();
         if (_model == null || Stats == null) return;
 
         if (Time.fixedTime >= _nextTargetRefresh)
@@ -565,6 +581,12 @@ public class PlaneAIController : MonoBehaviour
 
     // --- Aim point ---
 
+    // The idle/loiter aim point. Base = the cycled random patrol waypoint;
+    // AllyAI overrides it to steer to a live wing-formation slot. Terrain /
+    // ceiling / boundary / GCAS overlays are applied AFTER this in
+    // FixedUpdate, so an override stays flight-safe for free.
+    protected virtual Vector3 PatrolPoint() => _patrolWaypoint;
+
     Vector3 ResolveAimPoint(float leadScale)
     {
         switch (_state)
@@ -572,13 +594,13 @@ public class PlaneAIController : MonoBehaviour
             case AIState.Engage:
                 return _target != null
                     ? PredictedTargetPoint(Stats.SteerLeadTime * leadScale)
-                    : _patrolWaypoint;
+                    : PatrolPoint();
             case AIState.Disengage:
                 return _disengageReason == DisengageReason.LoseInterest
-                    ? _patrolWaypoint
+                    ? PatrolPoint()
                     : _breakAimPoint;
             default:
-                return _patrolWaypoint;
+                return PatrolPoint();
         }
     }
 
@@ -763,6 +785,13 @@ public class PlaneAIController : MonoBehaviour
                Time.fixedTime - _targetOutOfRangeSince >= Stats.LoseTargetTime;
     }
 
+    // Selection cost for `ph` (lower = preferred); `distSqFromSelf` precomputed.
+    // Base is faction-neutral nearest-hostile; subclasses bias it (EnemyAI:
+    // de-prioritise the human by playerScoreMul; AllyAI: defend the player).
+    protected virtual float ScoreCandidate(
+        PlaneHealth ph, float distSqFromSelf, float playerScoreMul)
+        => distSqFromSelf;
+
     // Selection only. The decision to commit or peel off lives in the FSM.
     void RefreshTarget(bool force)
     {
@@ -787,10 +816,9 @@ public class PlaneAIController : MonoBehaviour
         var all = Object.FindObjectsByType<PlaneHealth>(FindObjectsSortMode.None);
         var myPos = _transform.position;
 
-        // The human player is scored as PlayerTargetBias times farther than it
-        // really is, so the AI prefers allies and only commits to the player
-        // when it is the only hostile or vastly closer. The AcquireRange gate
-        // below still uses the TRUE distance.
+        // PlayerTargetBias², passed to ScoreCandidate so a subclass can score
+        // the human that many times farther (EnemyAI's prefer-allies doctrine).
+        // The AcquireRange gate below still uses the TRUE distance.
         var playerScoreMul = Stats.PlayerTargetBias * Stats.PlayerTargetBias;
 
         PlaneHealth best = null;
@@ -802,7 +830,7 @@ public class PlaneAIController : MonoBehaviour
             if (!_health.IsHostileTo(ph)) continue;
             if (TargetSlotFull(ph)) continue;
             var dSq = (ph.transform.position - myPos).sqrMagnitude;
-            var scoreSq = ph.Faction == PlaneFaction.Player ? dSq * playerScoreMul : dSq;
+            var scoreSq = ScoreCandidate(ph, dSq, playerScoreMul);
             if (scoreSq < bestScoreSq)
             {
                 bestScoreSq = scoreSq;
@@ -827,8 +855,7 @@ public class PlaneAIController : MonoBehaviour
         // hostile so it won't ditch an ally for a slightly-closer player.
         if (best == _target) return;
         var curDistSq = (_target.transform.position - myPos).sqrMagnitude;
-        var curScoreSq = _target.Faction == PlaneFaction.Player
-            ? curDistSq * playerScoreMul : curDistSq;
+        var curScoreSq = ScoreCandidate(_target, curDistSq, playerScoreMul);
         if (bestDistSq <= acquireSq &&
             bestScoreSq < curScoreSq * Stats.TargetSwitchHysteresis * Stats.TargetSwitchHysteresis)
         {

@@ -40,3 +40,16 @@ MonoBehaviour:
   CeilingNoseDownRate: 55
   CeilingRecoverMargin: 70
   CeilingMaxDiveAngle: 60
+  GroundGearHeight: 0.6
+  TaxiThrottleAccelRate: 0.4
+  TaxiThrottleDecelRate: 0.6
+  GroundAccel: 3
+  GroundBrakeDecel: 5
+  MaxGroundSpeed: 22
+  RotationSpeed: 16
+  GroundPitchRate: 25
+  MinFlyAltitude: 2
+  GroundSettleSpeed: 10
+  TakeoffSpeedBlendTime: 2
+  GroundSteerRateDeg: 45
+  GroundSteerSpeedRampUp: 4

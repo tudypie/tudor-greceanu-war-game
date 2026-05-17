@@ -168,4 +168,22 @@ public class PlaneAIStats : ScriptableObject
     public float GcaClimbOutMargin = 80f;
     [Tooltip("Number of samples taken along a patrol/break-off route so the straight path to the point is lifted above any hill it would otherwise pass through (not just the endpoint).")]
     [Range(2, 16)] public int GcaRouteProbeCount = 6;
+
+    [Header("Ally / Escort (AllyAI only — enemies ignore these)")]
+    [Tooltip("Lateral wing offset (world units) of each formation slot from the player.")]
+    public float FormationSpread = 120f;
+    [Tooltip("How far behind the player (world units) each formation slot sits.")]
+    public float FormationBack = 80f;
+    [Tooltip("Vertical step (world units) added per formation rank so stacked pairs don't overlap.")]
+    public float FormationStack = 20f;
+    [Tooltip("Seconds of the player's velocity led into the slot so the wingman matches heading instead of chasing a lagging point.")]
+    public float FormationLeadTime = 0.5f;
+    [Tooltip("Within this distance (world units) of its slot the ally flies parallel to the player's heading instead of pinning the point — kills the close-in weave.")]
+    public float FormationSettleDistance = 60f;
+    [Tooltip("When the player is shot, nearby allies break off and hunt the attacker with the same lock they use when shot themselves.")]
+    public bool GuardPlayerWhenShot = true;
+    [Tooltip("Max distance (world units) from the ally to the player's attacker to answer a guard call. 0 = unlimited.")]
+    public float GuardResponseRange = 2500f;
+    [Tooltip("Max allies (counted scene-wide) that may guard-respond at once, so the squadron isn't fully drained off the player. 0 = unlimited.")]
+    public int MaxGuardResponders = 2;
 }

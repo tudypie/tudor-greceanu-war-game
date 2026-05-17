@@ -12,6 +12,7 @@ public class PlaneCrash : MonoBehaviour
 
     PlaneHealth _health;
     Rigidbody _rigidbody;
+    PlaneFlightModel _model;
     bool _crashed;
     bool _exploded;
     Quaternion _diveRotation;
@@ -31,6 +32,7 @@ public class PlaneCrash : MonoBehaviour
     {
         _health = GetComponent<PlaneHealth>();
         _rigidbody = GetComponent<Rigidbody>();
+        _model = GetComponent<PlaneFlightModel>();
         _health.DestroyOnDeath = false;
         _health.Died += Crash;
         _terrain = Terrain.activeTerrain;
@@ -77,12 +79,13 @@ public class PlaneCrash : MonoBehaviour
         _rigidbody.angularVelocity = Vector3.zero;
 
         // Straight down: drop the forward airspeed PlaneFlightModel was holding
-        // (and any upward coast if it was shot mid-climb) so gravity takes it
-        // vertically, instead of arcing far downrange on its last velocity.
+        // (and any upward coast if it was shot mid-climb) so it goes vertically
+        // instead of arcing downrange, then kick it to DiveSpeed so it comes
+        // down hard rather than waiting for gravity to build up from zero.
         var v = _rigidbody.linearVelocity;
         v.x = 0f;
         v.z = 0f;
-        if (v.y > 0f) v.y = 0f;
+        v.y = Mathf.Min(v.y, -Stats.DiveSpeed);
         _rigidbody.linearVelocity = v;
 
         var flatForward = new Vector3(transform.forward.x, 0f, transform.forward.z);
@@ -136,6 +139,11 @@ public class PlaneCrash : MonoBehaviour
         if (Stats == null) return;
         if (!_crashed)
         {
+            // A live plane parked/taxiing on the strip rests its collider on
+            // the TerrainCollider by design — that contact must not be read as
+            // a crash. (ExplodeOnCollision also defaults off, but don't rely
+            // on the SO flag.)
+            if (_model != null && _model.IsGrounded) return;
             if (Stats.ExplodeOnCollision) Explode();
             return;
         }
@@ -151,11 +159,29 @@ public class PlaneCrash : MonoBehaviour
         if (_exploded) return;
         _exploded = true;
         Exploded?.Invoke();
-        if (Stats != null && Stats.ExplosionPrefab != null)
+        if (Stats != null && Stats.ExplosionRadius > 0f)
         {
-            Instantiate(Stats.ExplosionPrefab, transform.position, transform.rotation);
+            Fireball.Spawn(transform.position, Stats.ExplosionRadius, Stats.ExplosionLife);
         }
+        DamageAirfieldBlast();
         Debug.Log($"{gameObject.name} exploded");
         Destroy(gameObject);
+    }
+
+    // Mission-1: an airframe going down on the field hurts the objective.
+    // Inert wherever there is no Airfield (null Instance), like AirfieldStrikeRun.
+    void DamageAirfieldBlast()
+    {
+        if (Stats == null || Stats.AirfieldBlastDamage <= 0f) return;
+        var airfield = Airfield.Instance;
+        if (airfield == null || airfield.IsDestroyed) return;
+
+        var radius = Stats.AirfieldBlastRadius;
+        if (radius <= 0f) return;
+        var dist = Vector3.Distance(transform.position, airfield.transform.position);
+        if (dist >= radius) return;
+
+        var damage = Stats.AirfieldBlastDamage * (1f - dist / radius);
+        airfield.ApplyDamage(damage);
     }
 }

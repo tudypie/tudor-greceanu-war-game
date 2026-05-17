@@ -41,6 +41,11 @@ public class PlaneSpawner : MonoBehaviour
     readonly List<PlaneAIController> _alive = new();
     float _nextSpawnAt;
 
+    // Mission hook: a OneShot squadron is done once its full count has been
+    // emitted and none of them remain alive.
+    public bool Finished => OneShot && _totalSpawned >= TargetCount && _alive.Count == 0;
+    public int AliveCount => _alive.Count;
+
     void Start()
     {
         var player = FindFirstObjectByType<PlanePlayerInput>();

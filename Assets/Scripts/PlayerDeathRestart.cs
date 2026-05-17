@@ -1,31 +1,14 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-[RequireComponent(typeof(PlaneHealth))]
+[RequireComponent(typeof(PlaneCrash))]
 public class PlayerDeathRestart : MonoBehaviour
 {
-    public float RestartDelay = 5f;
-
-    PlaneHealth _health;
-    bool _scheduled;
-
-    void Awake()
-    {
-        _health = GetComponent<PlaneHealth>();
-        _health.Died += OnDied;
-    }
-
-    void OnDestroy()
-    {
-        if (_health != null) _health.Died -= OnDied;
-    }
-
-    void OnDied()
-    {
-        if (_scheduled) return;
-        _scheduled = true;
-        Invoke(nameof(Restart), RestartDelay);
-    }
+    // Exploded fires once for every way the player's run ends — shot down then
+    // dived into the ground, or flown straight into terrain — so reload right
+    // there. No delay/Invoke: PlaneCrash destroys this object the same frame,
+    // which would cancel any pending timer (the bug this had before).
+    void Awake() => GetComponent<PlaneCrash>().Exploded += Restart;
 
     void Restart()
     {

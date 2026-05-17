@@ -19,10 +19,13 @@ using UnityEditor;
 // - river valley        -> a meandering low-flight corridor / landmark
 // + flattened spawn pad -> keeps takeoff + the 200-500 m spawn shell clear
 //
-// Surface texturing is baked in the same pass: a splatmap blends grass ->
-// rock -> snow by world altitude, with steep faces forced toward rock so
-// cliffs never read as grass/snow. Missing layers are auto-generated as
-// solid-colour placeholder assets (swap their diffuse for real art later).
+// Surface texturing is baked in the same pass. Altitude drives rock -> snow.
+// The low band is mostly green grass, with a capped amount of a slightly
+// yellower dry-grass mixed in over broad areas (large-wavelength noise) so the
+// field has gentle tonal variation rather than one flat colour. Steep faces
+// below the snow line are forced toward rock so cliffs never read as grass;
+// above it the snow cap survives so rugged peaks read as snow-capped. Missing
+// layers are auto-generated as solid-colour placeholders (swap diffuse later).
 [RequireComponent(typeof(Terrain))]
 public class TerrainGenerator : MonoBehaviour
 {
@@ -32,6 +35,12 @@ public class TerrainGenerator : MonoBehaviour
     [Header("Target")]
     [Tooltip("Terrain to bake into. Auto-filled from this GameObject.")]
     public Terrain TargetTerrain;
+    [Tooltip("Dedicated TerrainData asset name (no extension) under " +
+             "Assets/Content/Terrain. Empty = the active scene's name. " +
+             "Generate & Save bakes into THIS asset only and repoints the " +
+             "Terrain+Collider at it, so saving one scene can never overwrite " +
+             "another's terrain — even if the scene was duplicated.")]
+    public string AssetName = "";
 
     [Header("Determinism")]
     public int Seed = 12345;
@@ -112,12 +121,28 @@ public class TerrainGenerator : MonoBehaviour
     public bool ApplyTexturing = true;
     [Tooltip("Splatmap grid resolution. 512 is plenty for band/slope blends seen from a plane.")]
     public AlphamapRes Resolution_Alphamap = AlphamapRes.Res512;
-    [Tooltip("Low band. Auto-generated as a solid green placeholder if left empty.")]
+    [Tooltip("Low band, dominant. Auto-generated solid green if empty.")]
     public TerrainLayer GrassLayer;
+    [Tooltip("Slightly yellower grass, mixed sparingly into the low band. " +
+             "Auto-generated solid yellow-green if empty.")]
+    public TerrainLayer DryGrassLayer;
     [Tooltip("Mid band + all steep faces. Auto-generated as solid grey if empty.")]
     public TerrainLayer RockLayer;
     [Tooltip("High band. Auto-generated as solid white if empty.")]
     public TerrainLayer SnowLayer;
+
+    [Header("Lowland Tint Variation (subtle)")]
+    [Tooltip("Wavelength (m) of the noise that varies dry-grass across the " +
+             "field. Large = broad gentle areas, not patches.")]
+    public float BiomeWavelength = 2600f;
+    [Tooltip("Region-noise value (0..1) above which dry-grass starts mixing in.")]
+    [Range(0f, 1f)] public float BiomeDryStart = 0.55f;
+    [Tooltip("± soft range (0..1) over which dry-grass eases in. Wide = cleanly blended.")]
+    public float BiomeBlend = 0.18f;
+    [Tooltip("Max dry-grass fraction anywhere (0..1). Caps it so the field stays mostly green.")]
+    [Range(0f, 1f)] public float DryGrassMax = 0.3f;
+
+    [Header("Altitude Bands")]
     [Tooltip("World altitude (m) of the grass->rock crossover; ± blend each side.")]
     public float GrassRockAltitude = 170f;
     public float GrassRockBlend = 60f;
@@ -216,10 +241,14 @@ public class TerrainGenerator : MonoBehaviour
 
     // --- Surface texturing --------------------------------------------------
 
-    // Blend grass -> rock -> snow by altitude, then pull steep faces toward
-    // rock. Reads the *baked* terrain back via GetInterpolatedHeight /
-    // GetSteepness so the splat tracks the real surface (incl. warp, river,
-    // flatten pad) at the alphamap's own resolution.
+    // Layer order is fixed and must match maps[] channel indices below.
+    const int LGrass = 0, LDryGrass = 1, LRock = 2, LSnow = 3;
+
+    // Altitude drives rock -> snow; the low band is mostly grass with a capped
+    // amount of dry-grass eased in by a large-wavelength noise; steep faces
+    // below the snow line are then pulled toward rock. Reads the *baked* terrain back via
+    // GetInterpolatedHeight / GetSteepness so the splat tracks the real surface
+    // (incl. warp, river, flatten pad) at the alphamap's own resolution.
     void BakeSplatmap(TerrainData data)
     {
         var layers = ResolveLayers();
@@ -228,14 +257,21 @@ public class TerrainGenerator : MonoBehaviour
 
         int ar = (int)Resolution_Alphamap;
         data.alphamapResolution = ar;
-        var maps = new float[ar, ar, 3];
+        var maps = new float[ar, ar, layers.Length];
+
+        // Region noise offset: deterministic from Seed, independent of the
+        // height pass's RNG stream so re-baking is stable.
+        Vector2 oBiome = RandOffset(new System.Random(Seed * 397 + 17));
+        float biomeFreq = 1f / Mathf.Max(1f, BiomeWavelength);
 
         for (int y = 0; y < ar; y++)
         {
             float v = y / (float)(ar - 1);   // normalised Z (terrain length)
+            float wz = v * SizeZ;
             for (int x = 0; x < ar; x++)
             {
                 float u = x / (float)(ar - 1);          // normalised X (width)
+                float wx = u * SizeX;
                 float alt = data.GetInterpolatedHeight(u, v);   // metres
                 float steep = data.GetSteepness(u, v);          // degrees
 
@@ -244,62 +280,80 @@ public class TerrainGenerator : MonoBehaviour
                                  GrassRockAltitude + GrassRockBlend, alt);
                 float s2 = SStep(RockSnowAltitude - RockSnowBlend,
                                  RockSnowAltitude + RockSnowBlend, alt);
-                float wGrass = 1f - s1;
+                float wLow = 1f - s1;                        // total low-band weight
                 float wRock = Mathf.Clamp01(s1 - s2);
                 float wSnow = s2;
 
+                // Ease a *capped* amount of dry-grass into the low band so the
+                // field reads as mostly green with gentle tonal variation.
+                float b = Fbm(wx, wz, biomeFreq, 2, 2f, 0.5f, oBiome);
+                float dry = SStep(BiomeDryStart - BiomeBlend,
+                                  BiomeDryStart + BiomeBlend, b);
+                float yellowFrac = dry * Mathf.Clamp01(DryGrassMax);
+                float wGreen = wLow * (1f - yellowFrac);
+                float wYellow = wLow * yellowFrac;
+
                 // Steep faces -> rock, fading in across CliffBlend degrees.
-                float cf = SStep(CliffAngle, CliffAngle + CliffBlend, steep);
-                wGrass = Mathf.Lerp(wGrass, 0f, cf);
+                // Above the snow line the override is eased out by s2 so the
+                // altitude snow cap survives on steep crests (snow-capped peaks
+                // rather than bare rock); below it cliffs still read as rock.
+                float cf = SStep(CliffAngle, CliffAngle + CliffBlend, steep) * (1f - s2);
+                wGreen = Mathf.Lerp(wGreen, 0f, cf);
+                wYellow = Mathf.Lerp(wYellow, 0f, cf);
                 wRock = Mathf.Lerp(wRock, 1f, cf);
                 wSnow = Mathf.Lerp(wSnow, 0f, cf);
 
-                float sum = wGrass + wRock + wSnow;
+                float sum = wGreen + wYellow + wRock + wSnow;
                 if (sum < 1e-5f) { wRock = 1f; sum = 1f; }
-                maps[y, x, 0] = wGrass / sum;
-                maps[y, x, 1] = wRock / sum;
-                maps[y, x, 2] = wSnow / sum;
+                maps[y, x, LGrass] = wGreen / sum;
+                maps[y, x, LDryGrass] = wYellow / sum;
+                maps[y, x, LRock] = wRock / sum;
+                maps[y, x, LSnow] = wSnow / sum;
             }
         }
 
         data.SetAlphamaps(0, 0, maps);
         Debug.Log($"[TerrainGenerator] Baked {ar}x{ar} splatmap " +
-                  $"(grass<{GrassRockAltitude}m, snow>{RockSnowAltitude}m, " +
-                  $"cliff>{CliffAngle}°).", this);
+                  $"(mostly grass, ≤{DryGrassMax:P0} dry-grass @ {BiomeWavelength}m, " +
+                  $"snow>{RockSnowAltitude}m, cliff>{CliffAngle}°).", this);
     }
 
     // Smoothstep over [a, b] -> 0..1 (handles a == b without dividing by zero).
     static float SStep(float a, float b, float x) =>
         Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(a, b, x));
 
-    // Returns the 3 layers in [grass, rock, snow] order. In the editor any
-    // unassigned slot is created as a committed solid-colour placeholder
-    // asset; at runtime it falls back to a transient in-memory layer.
+    // Placeholder tints (also used by the runtime transient fallback).
+    static readonly Color CGrass = new(0.36f, 0.52f, 0.22f);   // green
+    static readonly Color CDryGrass = new(0.50f, 0.55f, 0.26f);   // muted yellow-green
+    static readonly Color CRock = new(0.45f, 0.42f, 0.38f);   // grey
+    static readonly Color CSnow = new(0.92f, 0.93f, 0.96f);   // white
+
+    // Returns the 4 layers in [grass, dry-grass, rock, snow] order (matches the
+    // LGrass.. indices). In the editor any unassigned slot is created as a
+    // committed solid-colour placeholder asset alongside the existing ones; at
+    // runtime it falls back to a transient in-memory layer.
     TerrainLayer[] ResolveLayers()
     {
 #if UNITY_EDITOR
-        const string root = "Assets/Data";
-        const string dir = root + "/Terrain";
-        if (!UnityEditor.AssetDatabase.IsValidFolder(dir))
-        {
-            if (!UnityEditor.AssetDatabase.IsValidFolder(root))
-                UnityEditor.AssetDatabase.CreateFolder("Assets", "Data");
-            UnityEditor.AssetDatabase.CreateFolder(root, "Terrain");
-        }
-        if (GrassLayer == null) GrassLayer = MakeLayerAsset(dir, "Terrain.Grass", new Color(0.36f, 0.52f, 0.22f));
-        if (RockLayer == null) RockLayer = MakeLayerAsset(dir, "Terrain.Rock", new Color(0.45f, 0.42f, 0.38f));
-        if (SnowLayer == null) SnowLayer = MakeLayerAsset(dir, "Terrain.Snow", new Color(0.92f, 0.93f, 0.96f));
+        EnsureTerrainFolder();
+        const string dir = TerrainDir;
+        if (GrassLayer == null) GrassLayer = MakeLayerAsset(dir, "Terrain.Grass", CGrass);
+        if (DryGrassLayer == null) DryGrassLayer = MakeLayerAsset(dir, "Terrain.DryGrass", CDryGrass);
+        if (RockLayer == null) RockLayer = MakeLayerAsset(dir, "Terrain.Rock", CRock);
+        if (SnowLayer == null) SnowLayer = MakeLayerAsset(dir, "Terrain.Snow", CSnow);
 #else
-        if (GrassLayer == null) GrassLayer = MakeLayerTransient(new Color(0.36f, 0.52f, 0.22f));
-        if (RockLayer == null) RockLayer = MakeLayerTransient(new Color(0.45f, 0.42f, 0.38f));
-        if (SnowLayer == null) SnowLayer = MakeLayerTransient(new Color(0.92f, 0.93f, 0.96f));
+        if (GrassLayer == null) GrassLayer = MakeLayerTransient(CGrass);
+        if (DryGrassLayer == null) DryGrassLayer = MakeLayerTransient(CDryGrass);
+        if (RockLayer == null) RockLayer = MakeLayerTransient(CRock);
+        if (SnowLayer == null) SnowLayer = MakeLayerTransient(CSnow);
 #endif
-        if (GrassLayer == null || RockLayer == null || SnowLayer == null)
+        if (GrassLayer == null || DryGrassLayer == null ||
+            RockLayer == null || SnowLayer == null)
         {
-            Debug.LogWarning("[TerrainGenerator] Texturing skipped: assign Grass/Rock/Snow layers.", this);
+            Debug.LogWarning("[TerrainGenerator] Texturing skipped: assign all 4 terrain layers.", this);
             return null;
         }
-        return new[] { GrassLayer, RockLayer, SnowLayer };
+        return new[] { GrassLayer, DryGrassLayer, RockLayer, SnowLayer };
     }
 
     static Texture2D SolidTex(Color c)
@@ -338,16 +392,73 @@ public class TerrainGenerator : MonoBehaviour
 #endif
 
 #if UNITY_EDITOR
+    const string TerrainDir = "Assets/Content/Terrain";
+
+    static void EnsureTerrainFolder()
+    {
+        if (AssetDatabase.IsValidFolder(TerrainDir)) return;
+        if (!AssetDatabase.IsValidFolder("Assets/Content"))
+            AssetDatabase.CreateFolder("Assets", "Content");
+        AssetDatabase.CreateFolder("Assets/Content", "Terrain");
+    }
+
+    // The TerrainData asset this generator owns: Assets/Content/Terrain/<name>,
+    // where <name> defaults to the scene so each scene bakes its own file.
+    string OwnedAssetPath()
+    {
+        string name = string.IsNullOrWhiteSpace(AssetName)
+            ? gameObject.scene.name : AssetName.Trim();
+        if (string.IsNullOrEmpty(name)) name = gameObject.name;
+        return $"{TerrainDir}/{name}.asset";
+    }
+
+    // Guarantees the Terrain (and its sibling collider) point at this scene's
+    // own dedicated TerrainData. If they reference a shared/duplicated asset
+    // (the classic "saving one scene overwrites the other" bug), the data is
+    // cloned to the owned path and the references are repointed — so the bake
+    // below can only ever touch this scene's asset.
+    void EnsureOwnedTerrainData()
+    {
+        EnsureTerrainFolder();
+        string path = OwnedAssetPath();
+
+        var current = TargetTerrain.terrainData;
+        string currentPath = current != null ? AssetDatabase.GetAssetPath(current) : "";
+        if (currentPath.Replace('\\', '/') == path) return;   // already owned
+
+        var owned = AssetDatabase.LoadAssetAtPath<TerrainData>(path);
+        if (owned == null)
+        {
+            owned = current != null ? Instantiate(current) : new TerrainData();
+            AssetDatabase.CreateAsset(owned, path);
+        }
+
+        TargetTerrain.terrainData = owned;
+        var col = GetComponent<TerrainCollider>();
+        if (col != null) { col.terrainData = owned; EditorUtility.SetDirty(col); }
+        EditorUtility.SetDirty(TargetTerrain);
+        Debug.Log($"[TerrainGenerator] Bake target repointed to {path} " +
+                  $"(was '{(string.IsNullOrEmpty(currentPath) ? "none" : currentPath)}').", this);
+    }
+
     // Generate, then persist the modified TerrainData asset to disk so the
     // bake is committed (deterministic mission, no runtime hitch).
     public void GenerateAndSave()
     {
+        if (TargetTerrain == null) TargetTerrain = GetComponent<Terrain>();
+        if (TargetTerrain == null)
+        {
+            Debug.LogError("[TerrainGenerator] No Terrain to bake into.", this);
+            return;
+        }
+        EnsureOwnedTerrainData();
         Generate();
-        if (TargetTerrain == null || TargetTerrain.terrainData == null) return;
+        if (TargetTerrain.terrainData == null) return;
         EditorUtility.SetDirty(TargetTerrain.terrainData);
         EditorUtility.SetDirty(this);   // keep auto-assigned layer refs
         AssetDatabase.SaveAssets();
-        Debug.Log("[TerrainGenerator] TerrainData asset saved.", this);
+        Debug.Log($"[TerrainGenerator] Saved " +
+                  $"{AssetDatabase.GetAssetPath(TargetTerrain.terrainData)}.", this);
     }
 
     [ContextMenu("Generate (preview, no save)")]
