@@ -35,9 +35,7 @@ public class RiverValleyPathEditor : Editor
                 $"{path.Length:N0} m  ({path.PolylineXZ.Count} cached pts)");
     }
 
-    // Seeds the SplineContainer with a few knots wandering down +Z across the
-    // map, so you start by *adjusting* a route rather than from a blank spline.
-    // Spans the TerrainGenerator's footprint if one is in the scene.
+    // Seeds the spline with a few knots down +Z, spanning the terrain footprint if present.
     static void LayStarterRoute(RiverValleyPath path)
     {
         var container = path.Container;

@@ -1,7 +1,6 @@
 using UnityEngine;
 
-// Per-sound 3D attenuation. Every spatial cue carries its own copy so a
-// distant explosion can still carry while a minigun falls off close in.
+// Per-sound 3D attenuation; each cue carries its own copy.
 [System.Serializable]
 public class SpatialAudioSettings
 {
